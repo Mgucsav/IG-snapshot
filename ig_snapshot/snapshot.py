@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from . import config, db
 from .api import GraphAPIError, GraphClient, RateLimited
@@ -57,9 +57,12 @@ def account_stats(conn, snapshot_date: date, username: str, data: dict, saved: i
     }
 
 
-def store_account(conn, snapshot_date: date, username: str, data: dict) -> int:
-    """Bir hesabın business_discovery çıktısını veritabanına yazar; kaydedilen gönderi sayısını döner."""
+def store_account(conn, snapshot_date: date, username: str, data: dict,
+                  skip_ids: set[str] | None = None) -> int:
+    """Bir hesabın business_discovery çıktısını veritabanına yazar; kaydedilen gönderi sayısını döner.
+    skip_ids: takibi tamamlanmış gönderiler — değerleri tamamlandığı günde dondurulur, yeni ölçüm yazılmaz."""
     profile = data.get("profile") or {}
+    skip_ids = skip_ids or set()
     db.upsert_account(conn, username, profile.get("id"), profile.get("name"))
     db.upsert_profile_snapshot(
         conn, snapshot_date, username,
@@ -70,7 +73,7 @@ def store_account(conn, snapshot_date: date, username: str, data: dict) -> int:
     count = 0
     for m in data.get("media") or []:
         media_id = m.get("id")
-        if not media_id:
+        if not media_id or media_id in skip_ids:
             continue
         db.upsert_media(
             conn, media_id, username,
@@ -84,6 +87,46 @@ def store_account(conn, snapshot_date: date, username: str, data: dict) -> int:
         )
         count += 1
     return count
+
+
+def evaluate_completion(conn, username: str, snapshot_date: date, cutoff: str) -> int:
+    """Günlük artışı sönen gönderileri 'tamamlandı' işaretler; işaretlenen sayısını döner.
+
+    Kural: en az MIN_TRACK_DAYS günlük ölçüm varken, son günün artışı bir önceki günün artışının
+    STOP_RATIO katından azsa (ya da iki gündür hiç artış yoksa). Reels'te izlenme, Feed'de beğeni esas alınır.
+    """
+    done = 0
+    today = snapshot_date.isoformat()
+    for m in db.active_media(conn, username, cutoff):
+        snaps = db.last_snapshots(conn, m["media_id"], 3)
+        if len(snaps) < 3 or snaps[0]["snapshot_date"] != today:
+            continue
+        published = (m["published_at"] or today)[:10]
+        if (snapshot_date - date.fromisoformat(published)).days < config.MIN_TRACK_DAYS:
+            continue
+        key = "view_count" if any(s["view_count"] is not None for s in snaps) else "like_count"
+        v0, v1, v2 = (s[key] for s in snaps)
+        if None in (v0, v1, v2):
+            continue
+        gain_today, gain_prev = v0 - v1, v1 - v2
+        if (gain_prev > 0 and gain_today < config.STOP_RATIO * gain_prev) or (gain_prev <= 0 and gain_today <= 0):
+            db.mark_completed(conn, m["media_id"], today)
+            done += 1
+    if done:
+        log.info("@%s — %d gönderinin takibi tamamlandı", username, done)
+    return done
+
+
+def prune_old(conn, snapshot_date: date) -> int:
+    """Tamamlanmış gönderilerin eski ara ölçümlerini budar; çok satır silindiyse dosyayı sıkıştırır."""
+    before = (snapshot_date - timedelta(days=config.PRUNE_AFTER_DAYS)).isoformat()
+    with conn:
+        removed = db.prune_completed(conn, before)
+    if removed:
+        log.info("Budama: %s öncesi %d ara ölçüm silindi", before, removed)
+        if removed >= 5000:
+            conn.execute("VACUUM")
+    return removed
 
 
 def usage_peak(client: GraphClient) -> float:
@@ -134,15 +177,17 @@ def run_snapshot(snapshot_date: date | None = None) -> dict:
              snapshot_date, len(accounts), cutoff, config.TRACK_DAYS)
     for i, username in enumerate(accounts, 1):
         try:
+            completed = db.completed_ids(conn, username)
             data = client.business_discovery(
                 config.IG_USER_ID, username,
                 page_size=config.MEDIA_PAGE_SIZE, max_media=config.MEDIA_MAX,
-                stop_before=cutoff,
+                stop_before=cutoff, completed_ids=completed,
             )
             with conn:
                 stats[username] = account_stats(conn, snapshot_date, username, data, 0)  # takipçi farkı için önce
-                n = store_account(conn, snapshot_date, username, data)
+                n = store_account(conn, snapshot_date, username, data, skip_ids=completed)
                 stats[username]["saved"] = n
+                evaluate_completion(conn, username, snapshot_date, cutoff)
             prof = data.get("profile") or {}
             log.info("[%d/%d] @%s — takipçi %s, %d gönderi kaydedildi",
                      i, len(accounts), username, prof.get("followers_count"), n)
@@ -167,6 +212,7 @@ def run_snapshot(snapshot_date: date | None = None) -> dict:
     with conn:
         db.record_run(conn, started_at, len(ok), len(failed),
                       notes="; ".join(f"{u}: {e}" for u, e in failed.items())[:1000])
+    prune_old(conn, snapshot_date)
     conn.close()
     log.info("Snapshot bitti: %d başarılı, %d hatalı", len(ok), len(failed))
     return {"date": snapshot_date, "ok": ok, "failed": failed, "stats": stats,

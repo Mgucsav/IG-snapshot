@@ -235,6 +235,7 @@ def build_account_report(conn, username: str, month: str, with_prev: bool = True
     media_by_id = {r["media_id"]: r for r in media_rows}
     snaps = db.media_snapshots_in_range(conn, username, start, end)
     baseline = db.media_baseline_before(conn, username, start)
+    tracked_since = db.first_profile_date(conn, username) or start
 
     # Gün gün kazanılan izlenme/beğeni/yorum (Reels ve Feed ayrı):
     # her gönderinin bir önceki ölçüme göre artışı
@@ -252,10 +253,11 @@ def build_account_report(conn, username: str, month: str, with_prev: bool = True
             if mid in baseline:
                 b = baseline[mid]
                 last_val[mid] = (b["view_count"], b["like_count"], b["comments_count"])
-            elif mrow is not None and mrow["published_month"] == month:
-                last_val[mid] = (0, 0, 0)  # bu ay yayınlandı: ilk ölçümün tamamı kazanım
+            elif (mrow is not None and mrow["published_month"] == month
+                  and (mrow["published_at"] or "")[:10] >= tracked_since):
+                last_val[mid] = (0, 0, 0)  # takip başladıktan sonra yayınlandı: tamamı kazanım
             else:
-                last_val[mid] = cur  # ilk kez görülen eski gönderi: artış sayılmaz
+                last_val[mid] = cur  # takipten önce yayınlanmış, ilk kez görülen gönderi: artış sayılmaz
         prev = last_val[mid]
         g = daily_gain[s["snapshot_date"]][group_of(mrow["content_type"] if mrow else None)]
         if cur[0] is not None:

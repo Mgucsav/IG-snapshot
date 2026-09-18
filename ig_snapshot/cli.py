@@ -28,9 +28,11 @@ def setup_logging(verbose: bool = False) -> None:
     root.setLevel(logging.DEBUG if verbose else logging.INFO)
     fh = RotatingFileHandler(config.LOGS_DIR / "ig_snapshot.log", maxBytes=2_000_000, backupCount=3, encoding="utf-8")
     fh.setFormatter(fmt)
-    ch = logging.StreamHandler(sys.stdout)
-    ch.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
-    root.handlers = [fh, ch]
+    root.handlers = [fh]
+    if sys.stdout is not None:  # pythonw (bot görevi) altında konsol yok
+        ch = logging.StreamHandler(sys.stdout)
+        ch.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
+        root.handlers.append(ch)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
 
 
@@ -150,14 +152,16 @@ def cmd_snapshot(args) -> int:
         print(f"  @{u}: {e}")
     if notify.enabled():
         token = notify.token_status(result["client"])
+        highlights, gains = {}, {}
         try:
             conn = db.connect()
             highlights = daily_report.highlights_today(conn, snapshot_date)
+            gains = today_gains(conn, snapshot_date, result["ok"])
             conn.close()
         except Exception:  # noqa: BLE001
-            log.exception("Öne çıkanlar hesaplanamadı")
-            highlights = []
-        sent = notify.send(notify.build_snapshot_message(result, token, result["elapsed"], result["waited"], highlights))
+            log.exception("Öne çıkanlar / günlük kazanım hesaplanamadı")
+        sent = notify.send(notify.build_snapshot_message(result, token, result["elapsed"], result["waited"],
+                                                         highlights, gains))
         print("Telegram bildirimi gönderildi." if sent else "Telegram bildirimi gönderilemedi (log'a bak).")
         # Ay kapanışı: yeni ayın ilk günlerinde, bir kez
         prev = report.prev_month(snapshot_date.strftime("%Y-%m"))
@@ -167,6 +171,37 @@ def cmd_snapshot(args) -> int:
             except Exception:  # noqa: BLE001
                 log.exception("Ay kapanış mesajı gönderilemedi")
     return 0 if not result["failed"] or result["ok"] else 1
+
+
+def today_gains(conn, day: date, usernames: list[str]) -> dict:
+    """Her hesap için bugün kazanılanlar: toplam (tüm içerikler), bugünkü içeriklerden gelen ve arşivden gelen.
+
+    Döner: {username: {"total": Gain, "by_group": {Reels: Gain, Feed: Gain},
+                       "today_views", "today_likes", "today_comments", "archive_views", "archive_likes"}}
+    """
+    from . import daily_report, report
+
+    month = day.strftime("%Y-%m")
+    today = day.isoformat()
+    cohorts, _ = daily_report.build(conn, month)
+    out = {}
+    for u in usernames:
+        r = report.build_account_report(conn, u, month, with_prev=False)
+        row = next((d for d in r.daily if d.day == today), None) if r else None
+        if row is None:
+            continue
+        c = cohorts.get(u, {}).get(today)
+        tv = (c._sum("last_views") or 0) if c else 0
+        tl = (c._sum("last_likes") or 0) if c else 0
+        tc = (c._sum("last_comments") or 0) if c else 0
+        out[u] = {
+            "total": row.gain, "by_group": row.gain_by_group,
+            "today_views": tv, "today_likes": tl, "today_comments": tc,
+            "archive_views": max(0, row.gain.views - tv),
+            "archive_likes": max(0, row.gain.likes - tl),
+            "archive_comments": max(0, row.gain.comments - tc),
+        }
+    return out
 
 
 def build_month_end(month: str) -> str | None:
@@ -219,6 +254,26 @@ def cmd_month_summary(args) -> int:
     print(re.sub(r"<[^>]+>", "", text))
     print()
     print("(Göndermek için: --send)")
+    return 0
+
+
+def cmd_bot(args) -> int:
+    from .bot import run_bot
+    run_bot()
+    return 0
+
+
+def cmd_ask(args) -> int:
+    """Telegram'a göndermeden soru-cevabı dene."""
+    import re
+    from . import queries
+
+    conn = db.connect()
+    try:
+        text = queries.handle(conn, " ".join(args.text))
+    finally:
+        conn.close()
+    print(re.sub(r"<[^>]+>", "", text))
     return 0
 
 
@@ -376,6 +431,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("status", help="Veritabanı ve hesap durumu")
     s.set_defaults(func=cmd_status)
+
+    s = sub.add_parser("bot", help="Telegram sohbet botunu çalıştır (sürekli; sorulara cevap verir)")
+    s.set_defaults(func=cmd_bot)
+
+    s = sub.add_parser("ask", help="Bir soruyu Telegram olmadan dene: ask dün feed")
+    s.add_argument("text", nargs="+")
+    s.set_defaults(func=cmd_ask)
 
     s = sub.add_parser("month-summary", help="Ay kapanış mesajını göster / Telegram'a gönder")
     s.add_argument("--month", help="YYYY-MM, varsayılan bir önceki ay")

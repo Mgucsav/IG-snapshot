@@ -167,12 +167,15 @@ class GraphClient:
 
     def business_discovery(self, ig_user_id: str, username: str,
                            page_size: int = 50, max_media: int = 100,
-                           stop_before: str | None = None) -> dict:
+                           stop_before: str | None = None,
+                           completed_ids: set[str] | None = None) -> dict:
         """Rakip hesabın profil bilgisi + son gönderileri.
 
-        Sayfalama, gönderiler stop_before ('YYYY-MM-DD' UTC) tarihinden eskiyene kadar ya da
-        max_media sınırına kadar sürer. stop_before yoksa yalnızca max_media geçerlidir.
+        Sayfalama şu durumlarda durur: sayfadaki tüm gönderiler stop_before ('YYYY-MM-DD' UTC) tarihinden
+        eskiyse, sayfada takibi sürecek (tamamlanmamış ve ufuk içinde) tek gönderi kalmadıysa ya da
+        max_media sınırına ulaşıldıysa.
         """
+        completed_ids = completed_ids or set()
         media_fields = list(MEDIA_FIELDS)
         profile: dict | None = None
         media: list[dict] = []
@@ -212,5 +215,10 @@ class GraphClient:
                 break
             if stop_before and (rows[-1].get("timestamp") or "") < stop_before:
                 break  # sayfanın en eski gönderisi izleme ufkunun dışında
+            if completed_ids and not any(
+                m.get("id") not in completed_ids and (not stop_before or (m.get("timestamp") or "") >= stop_before)
+                for m in rows
+            ):
+                break  # bu sayfada hâlâ izlenen gönderi yok; daha eskilerde de olmaz
 
         return {"profile": profile or {}, "media": media[:max_media]}

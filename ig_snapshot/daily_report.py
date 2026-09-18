@@ -291,10 +291,15 @@ def generate(month: str, conn=None) -> Path | None:
     return path
 
 
-def highlights_today(conn, day: date, n: int = 3) -> list[PostPerf]:
-    """Bugün yayınlanan içerikler arasında en çok izlenen/beğenilen ilk n (Telegram için)."""
+def highlights_today(conn, day: date, n: int = 5) -> dict[str, list[PostPerf]]:
+    """Bugün yayınlanan içerikler: en çok izlenen n Reels ve en çok beğenilen n Feed (Telegram için)."""
     month = day.strftime("%Y-%m")
     _, posts = build(conn, month)
     today = day.isoformat()
     todays = [p for p in posts if p.day == today]
-    return sorted(todays, key=lambda p: (p.last_views or 0, p.last_likes or 0), reverse=True)[:n]
+    reels = [p for p in todays if p.group == "Reels"]
+    feed = [p for p in todays if p.group == "Feed"]
+    return {
+        "reels": sorted(reels, key=lambda p: (p.last_views or 0, p.last_likes or 0), reverse=True)[:n],
+        "feed": sorted(feed, key=lambda p: (p.last_likes or 0, p.last_comments or 0), reverse=True)[:n],
+    }

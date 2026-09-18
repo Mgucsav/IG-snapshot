@@ -70,7 +70,16 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(SCHEMA)
+    _migrate(conn)
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Sonradan eklenen sütunlar (mevcut veritabanlarını bozmadan)."""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(media)")}
+    if "completed_at" not in cols:
+        conn.execute("ALTER TABLE media ADD COLUMN completed_at TEXT")  # takip bitti: günlük artış söndü
+        conn.commit()
 
 
 def _now() -> str:
@@ -198,6 +207,12 @@ def last_profile_before(conn: sqlite3.Connection, username: str, start: str) -> 
     """, (username, start)).fetchone()
 
 
+def first_profile_date(conn: sqlite3.Connection, username: str) -> str | None:
+    """Hesabın izlenmeye başladığı gün (ilk ölçüm)."""
+    row = conn.execute("SELECT MIN(snapshot_date) AS d FROM profile_snapshots WHERE username = ?", (username,)).fetchone()
+    return row["d"] if row else None
+
+
 def latest_profile(conn: sqlite3.Connection, username: str) -> sqlite3.Row | None:
     return conn.execute("""
         SELECT * FROM profile_snapshots WHERE username = ?
@@ -244,3 +259,50 @@ def get_meta(conn: sqlite3.Connection, key: str) -> str | None:
 def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
     conn.execute("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                  (key, value))
+
+
+# --- takip tamamlanma ----------------------------------------------------------
+
+def completed_ids(conn: sqlite3.Connection, username: str) -> set[str]:
+    return {r["media_id"] for r in conn.execute(
+        "SELECT media_id FROM media WHERE username = ? AND completed_at IS NOT NULL", (username,))}
+
+
+def active_media(conn: sqlite3.Connection, username: str, published_since: str) -> list[sqlite3.Row]:
+    """Henüz tamamlanmamış, izleme ufku içindeki gönderiler."""
+    return conn.execute("""
+        SELECT media_id, published_at, content_type FROM media
+        WHERE username = ? AND completed_at IS NULL AND published_at >= ?
+    """, (username, published_since)).fetchall()
+
+
+def last_snapshots(conn: sqlite3.Connection, media_id: str, n: int = 3) -> list[sqlite3.Row]:
+    return conn.execute("""
+        SELECT snapshot_date, view_count, like_count FROM media_snapshots
+        WHERE media_id = ? ORDER BY snapshot_date DESC LIMIT ?
+    """, (media_id, n)).fetchall()
+
+
+def mark_completed(conn: sqlite3.Connection, media_id: str, day: str) -> None:
+    conn.execute("UPDATE media SET completed_at = ? WHERE media_id = ? AND completed_at IS NULL", (day, media_id))
+
+
+def prune_completed(conn: sqlite3.Connection, before_date: str) -> int:
+    """Tamamlanmış gönderilerin before_date'ten eski ARA ölçümlerini siler.
+
+    Korunanlar: gönderinin ilk ölçümü, her takvim ayındaki son ölçümü (ay sonu değeri) ve son ölçümü
+    (tamamlanma değeri). Böylece aylık toplamlar ve ilk gün / ay sonu / güncel değerleri değişmez.
+    """
+    cur = conn.execute("""
+        DELETE FROM media_snapshots WHERE rowid IN (
+            SELECT ms.rowid FROM media_snapshots ms
+            JOIN media m ON m.media_id = ms.media_id
+            WHERE m.completed_at IS NOT NULL AND ms.snapshot_date < ?
+              AND ms.snapshot_date <> (SELECT MIN(x.snapshot_date) FROM media_snapshots x WHERE x.media_id = ms.media_id)
+              AND ms.snapshot_date <> (SELECT MAX(x.snapshot_date) FROM media_snapshots x WHERE x.media_id = ms.media_id)
+              AND ms.snapshot_date <> (SELECT MAX(x.snapshot_date) FROM media_snapshots x
+                                       WHERE x.media_id = ms.media_id
+                                         AND substr(x.snapshot_date, 1, 7) = substr(ms.snapshot_date, 1, 7))
+        )
+    """, (before_date,))
+    return cur.rowcount

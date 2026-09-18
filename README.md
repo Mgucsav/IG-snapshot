@@ -42,6 +42,24 @@ accounts.txt + .env
         +--> optional Telegram summary
 ```
 
+```mermaid
+flowchart LR
+      A[accounts.txt<br/>local target list] --> B[CLI and scheduler]
+      E[.env<br/>local credentials] --> B
+      B --> C[Instagram Graph API<br/>Business Discovery]
+      C --> D[snapshot.py]
+      D --> DB[(SQLite database<br/>data/ig_snapshot.db)]
+      DB --> R[Report builders]
+      R --> M[Monthly Markdown / Excel / CSV]
+      R --> O[Overall reports]
+      R --> W[Per-account workbooks]
+      D --> T[Optional Telegram notification]
+      classDef private fill:#fff3cd,stroke:#b58105,color:#3d2b00;
+      class A,E,DB,M,O,W private;
+```
+
+Yellow nodes in the diagram are local runtime data. They are deliberately excluded from the public repository.
+
 1. `accounts.txt` supplies the usernames to monitor. Usernames, `@handles`, and Instagram profile URLs are accepted.
 2. `.env` supplies the access token, Instagram account ID, API version, limits, and optional Telegram settings.
 3. `check` validates the token, discovers `IG_USER_ID` when it is empty, and runs a sample Business Discovery request.
@@ -273,6 +291,20 @@ The following files and directories are intentionally ignored:
 - `logs/`, virtual environments, and Python cache files
 
 Do not commit access tokens, Telegram bot tokens, account lists, API responses, captions, generated reports, or logs. If a credential is ever exposed, revoke or rotate it immediately in Meta or Telegram.
+
+### What is public and what stays local
+
+| Item | Public repository | Local machine | Reason |
+|---|:---:|:---:|---|
+| Python source and scripts | Yes | Yes | Reusable application code |
+| `README.md` and `docs/` | Yes | Yes | Sanitized technical documentation |
+| `.env.example` | Yes | Yes | Empty configuration template |
+| `.env` | No | Yes | Contains credentials and runtime settings |
+| `accounts.txt` | No | Yes | Identifies monitored accounts |
+| `data/` | No | Yes | SQLite history and raw control exports |
+| `reports/` | No | Yes | Captions, links, metrics, and generated files |
+| `logs/` | No | Yes | Operational output and error details |
+| `.obsidian/` | No | Yes | Local editor and workspace state |
 
 ## Project structure
 

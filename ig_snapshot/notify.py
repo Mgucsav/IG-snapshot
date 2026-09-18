@@ -24,9 +24,9 @@ def esc(value) -> str:
     return html.escape(str(value), quote=False)
 
 
-def _post(method: str, payload: dict, token: str | None = None) -> dict:
+def _post(method: str, payload: dict, token: str | None = None, timeout: int = 20) -> dict:
     url = API.format(token=token or config.TELEGRAM_BOT_TOKEN, method=method)
-    resp = requests.post(url, json=payload, timeout=20)
+    resp = requests.post(url, json=payload, timeout=timeout)
     data = resp.json() if resp.content else {}
     if not resp.ok or not data.get("ok"):
         raise RuntimeError(f"Telegram {method}: {data.get('description') or resp.text[:200]}")
@@ -110,25 +110,42 @@ def _delta(n) -> str:
     return f" ({'+' if n > 0 else ''}{_fmt(n)})"
 
 
+def _plus(n) -> str:
+    return "–" if n is None else ("+" if n > 0 else "") + _fmt(n)
+
+
 def build_snapshot_message(result: dict, token: dict, elapsed_sec: float, waited_sec: int = 0,
-                           highlights: list | None = None) -> str:
+                           highlights: dict | None = None, gains: dict | None = None) -> str:
+    """gains: {username: DailyRow} — bugün kazanılan izlenme/beğeni/yorum (Reels/Feed ayrı)."""
     ok, failed, stats = result["ok"], result["failed"], result.get("stats", {})
+    gains = gains or {}
     total = len(ok) + len(failed)
     day: date = result["date"]
     icon = "✅" if not failed else ("⚠️" if ok else "🚨")
     saved_total = sum(s.get("saved", 0) for s in stats.values())
     lines = [f"📸 <b>IG Snapshot — {day:%d.%m.%Y} {datetime.now():%H:%M}</b>",
-             f"{icon} {len(ok)}/{total} hesap · {_fmt(saved_total)} gönderi · {elapsed_sec / 60:.0f} dk"
+             f"{icon} {len(ok)}/{total} hesap · {_fmt(saved_total)} gönderi izlendi · {elapsed_sec / 60:.0f} dk"
              + (f" (limit beklemesi {waited_sec // 60} dk)" if waited_sec else ""), ""]
 
     warnings: list[str] = []
     for u in ok:
         s = stats.get(u, {})
         lines.append(
-            f"<b>@{esc(u)}</b>  {_fmt(s.get('followers'))}{_delta(s.get('followers_delta'))}"
+            f"<b>@{esc(u)}</b>  {_fmt(s.get('followers'))} takipçi{_delta(s.get('followers_delta'))}"
             f" · bugün {s.get('posts_today', 0)} içerik (R{s.get('reels_today', 0)}/F{s.get('feed_today', 0)})"
-            f" · {s.get('saved', 0)} gönderi"
         )
+        g = gains.get(u)
+        if g is not None:
+            gr, gf = g["by_group"]["Reels"], g["by_group"]["Feed"]
+            lines.append(
+                f"   ↳ izlenme: bugünkü içerik <b>{_plus(g['today_views'])}</b> · arşiv <b>{_plus(g['archive_views'])}</b>"
+                f" · toplam {_plus(gr.views_or_none)}"
+            )
+            lines.append(
+                f"   ↳ beğeni: bugünkü <b>{_plus(g['today_likes'])}</b> · arşiv <b>{_plus(g['archive_likes'])}</b>"
+                f" · toplam {_plus(g['total'].likes)} (R {_plus(gr.likes)} / F {_plus(gf.likes)})"
+                f" · yorum {_plus(g['total'].comments)}"
+            )
         if s.get("saved", 0) == 0:
             warnings.append(f"@{esc(u)}: hiç gönderi gelmedi")
         if s.get("followers") is None:
@@ -144,13 +161,21 @@ def build_snapshot_message(result: dict, token: dict, elapsed_sec: float, waited
     for u, err in failed.items():
         lines.append(f"❌ <b>@{esc(u)}</b> — {esc(err)[:160]}")
 
-    if highlights:
-        lines += ["", "<b>🔥 Bugünün öne çıkanları</b>"]
-        for p in highlights:
-            metric = f"{_fmt(p.last_views)} izlenme" if p.last_views else f"{_fmt(p.last_likes)} beğeni"
-            cap = esc(p.caption[:50]) + ("…" if len(p.caption) > 50 else "")
-            lines.append(f"@{esc(p.username)} · {esc(p.content_type)} · <b>{metric}</b> · "
-                         f"<a href=\"{esc(p.permalink)}\">{cap or 'gönderi'}</a>")
+    def post_line(i, p, metric):
+        cap = esc(p.caption[:45]) + ("…" if len(p.caption) > 45 else "")
+        return (f"{i}. @{esc(p.username)} · <b>{metric}</b> · "
+                f"<a href=\"{esc(p.permalink)}\">{cap or 'gönderi'}</a>")
+
+    reels = (highlights or {}).get("reels") or []
+    feed = (highlights or {}).get("feed") or []
+    if reels:
+        lines += ["", "<b>🎬 Günün top 5 Reels</b> (bugün paylaşılanlar, izlenme)"]
+        lines += [post_line(i, p, f"{_fmt(p.last_views)} izlenme · {_fmt(p.last_likes)} beğeni")
+                  for i, p in enumerate(reels, 1)]
+    if feed:
+        lines += ["", "<b>🖼 Günün top 5 Feed</b> (bugün paylaşılanlar, beğeni)"]
+        lines += [post_line(i, p, f"{_fmt(p.last_likes)} beğeni · {_fmt(p.last_comments)} yorum · {esc(p.content_type)}")
+                  for i, p in enumerate(feed, 1)]
 
     if warnings:
         lines += ["", "<b>Veri kontrolü</b>"] + [f"⚠️ {w}" for w in warnings]
