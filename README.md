@@ -54,8 +54,9 @@ Windows Task Scheduler
 2. When a post's daily gain drops below `STOP_RATIO` × the previous day's gain (after at least `MIN_TRACK_DAYS`
    days), tracking stops and the post keeps its last value. This is an internal mechanism — reports never label
    posts as "completed".
-3. After `PRUNE_AFTER_DAYS`, intermediate measurements of completed posts are deleted; the first measurement,
-   each month-end value and the final value are kept, so monthly totals never change.
+3. Nothing is deleted: every daily measurement stays in the database so that day-by-day history is available
+   for year-over-year analysis. (Optional pruning of completed posts' intermediate rows exists behind
+   `PRUNE_AFTER_DAYS`, off by default.)
 
 ### Rate limits
 
@@ -193,7 +194,7 @@ them by hand is not preserved; a file open in Excel is skipped that night and lo
 | `TRACK_DAYS` | `45` | Posts are fetched while younger than this |
 | `STOP_RATIO` | `0.2` | Tracking stops when daily gain < ratio × previous day's gain |
 | `MIN_TRACK_DAYS` | `3` | Minimum age before a post can stop being tracked |
-| `PRUNE_AFTER_DAYS` | `90` | Intermediate measurements of stopped posts older than this are deleted |
+| `PRUNE_AFTER_DAYS` | `0` | 0 = keep every measurement (default); >0 enables pruning of stopped posts' intermediate rows |
 | `REQUEST_PAUSE` | `1.5` | Seconds between accounts |
 | `USAGE_PAUSE_PCT` | `70` | Pause when `X-App-Usage` exceeds this percentage |
 | `USAGE_SLEEP_SEC` | `600` | Pause length |

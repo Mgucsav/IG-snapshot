@@ -136,7 +136,13 @@ def friendly_error(exc: GraphAPIError) -> str:
 
 
 def prune_old(conn, snapshot_date: date) -> int:
-    """Tamamlanmış gönderilerin eski ara ölçümlerini budar; çok satır silindiyse dosyayı sıkıştırır."""
+    """Tamamlanmış gönderilerin eski ara ölçümlerini budar (varsayılan KAPALI: PRUNE_AFTER_DAYS=0).
+
+    Kullanıcı kararı (21.09.2026): ölçümler silinmez; tamamlanma yalnızca takibi durdurur ve son değeri
+    kabul eder. Bu fonksiyon sadece PRUNE_AFTER_DAYS > 0 verilirse çalışır.
+    """
+    if config.PRUNE_AFTER_DAYS <= 0:
+        return 0
     before = (snapshot_date - timedelta(days=config.PRUNE_AFTER_DAYS)).isoformat()
     with conn:
         removed = db.prune_completed(conn, before)

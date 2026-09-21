@@ -70,7 +70,9 @@ Bu dosya, sistemin **nasıl kurulduğunu adım adım** anlatır (ne yapıldı, n
     K/M, "bugünkü içerik / arşiv"), (2) günün Reels top 5 / en kötü 5, Feed top 5 / en kötü 5. "Veri kontrolü:
     sorun yok" hatası (hesap alınamamışken) düzeltildi.
 22. Bot loglarında token maskelendi; ağ kesintisinde kademeli bekleme (15 sn → 5 dk).
-23. **Haftalık Telegram raporu** (`weekly.py`): Pazar 23:30 çekiminden sonra, Pazartesi→Pazar dönemi, önceki
+23. **Budama kapatıldı:** kullanıcı silme istememişti (tamamlanma = takibi bırak, son değeri kabul et);
+    hiçbir ölçüm silinmemişti. Asıl hedef netleşti: bir yıl boyunca gün gün eksiksiz veri (yıl-yıl kıyas, 20–30 kanal).
+24. **Haftalık Telegram raporu** (`weekly.py`): Pazar 23:30 çekiminden sonra, Pazartesi→Pazar dönemi, önceki
     haftayla kıyaslı; ilk rapor 04.10.2026 (28.09 haftası, `WEEKLY_FROM`). `week-summary` komutu.
 
 ---

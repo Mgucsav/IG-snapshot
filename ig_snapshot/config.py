@@ -32,7 +32,7 @@ MEDIA_MAX = int(_env("MEDIA_MAX", "600"))                     # hesap başına �
 TRACK_DAYS = int(_env("TRACK_DAYS", "45"))                   # gönderi yayından sonra bu kadar gün ölçülür
 STOP_RATIO = float(_env("STOP_RATIO", "0.2"))                # günlük artış önceki günün bu oranının altına inince gönderi "tamamlandı"
 MIN_TRACK_DAYS = int(_env("MIN_TRACK_DAYS", "3"))             # tamamlanma kararı için en az bu kadar günlük ölçüm
-PRUNE_AFTER_DAYS = int(_env("PRUNE_AFTER_DAYS", "90"))       # tamamlanan gönderilerin bu kadar günden eski ara ölçümleri silinir
+PRUNE_AFTER_DAYS = int(_env("PRUNE_AFTER_DAYS", "0"))        # 0 = ölçüm silinmez (varsayılan). >0: tamamlanan gönderilerin eski ara ölçümleri budanır
 REQUEST_PAUSE = float(_env("REQUEST_PAUSE", "1.5"))
 USAGE_PAUSE_PCT = float(_env("USAGE_PAUSE_PCT", "70"))      # uygulama kullanımı bu yüzdeyi aşınca bekle
 USAGE_SLEEP_SEC = int(_env("USAGE_SLEEP_SEC", "600"))        # bekleme süresi (1 saatlik pencere kayana kadar)

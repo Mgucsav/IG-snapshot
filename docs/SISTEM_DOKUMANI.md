@@ -30,7 +30,7 @@ bazlı, günlük-kohort) her gece Excel/Markdown olarak yeniden üretilir; Teleg
 | **Ay sonu / güncel / sürüklenme** | Ay sonu = ay bitmeden önceki son ölçüm; güncel = en son ölçüm (ay bittikten sonra da artar); sürüklenme = güncel − ay sonu. |
 | **Bugünkü içerik / arşiv** | Akşam mesajında: bugün yayınlanan içeriklerden gelen kazanım vs. daha eski içeriklerden gelen kazanım. |
 | **Tamamlanma** | Gönderinin günlük artışı sönünce takibi biter, değeri dondurulur. **Raporlarda görünmez**, sadece iç mekanizma. |
-| **Budama** | Tamamlanmış gönderilerin eski ara ölçümlerinin silinmesi (ilk + ay sonu + son değer kalır). |
+| **Budama** | **Kapalı.** Ölçüm silinmez; tamamlanma sadece takibi durdurur. (`PRUNE_AFTER_DAYS>0` ile isteğe bağlı açılabilir.) |
 | **Biz / Rakipler** | `accounts.txt` içindeki `[biz]` ve `[rakipler]` bölümleri. Bot cevaplarında ayrı bloklar. |
 
 ---
@@ -109,7 +109,7 @@ IG-snapshot/
 | `TRACK_DAYS` | `45` | Gönderi yayından sonra en fazla bu kadar gün çekilir; sayfalama bu tarihe kadar iner |
 | `STOP_RATIO` | `0.2` | Tamamlanma: günlük artış < STOP_RATIO × önceki günün artışı |
 | `MIN_TRACK_DAYS` | `3` | Tamamlanma kararı için asgari yaş/ölçüm |
-| `PRUNE_AFTER_DAYS` | `90` | Tamamlanan gönderilerin bu kadar günden eski ara ölçümleri silinir |
+| `PRUNE_AFTER_DAYS` | `0` | 0 = hiçbir ölçüm silinmez (varsayılan, kullanıcı kararı); >0 budamayı açar |
 | `REQUEST_PAUSE` | `1.5` | Hesaplar arası bekleme (sn) |
 | `USAGE_PAUSE_PCT` | `70` | `X-App-Usage` yüzdesi bunu aşınca bekle |
 | `USAGE_SLEEP_SEC` | `600` | Bekleme adımı (sn) |
@@ -221,8 +221,9 @@ Not: harfiyen "bir gün öncesinden %20 az izlenince" kuralı (`STOP_RATIO=0.8`)
 düşüşü nedeniyle çoğu videoyu 2. gün kapatır; bu yüzden varsayılan 0.2 (yani %80 düşüş) seçildi. `.env`'den
 değiştirilebilir.
 
-### 6.5 Budama (`prune_old` → `db.prune_completed`)
+### 6.5 Budama (`prune_old` → `db.prune_completed`) — VARSAYILAN KAPALI
 
+21.09.2026 kararı: **ölçümler silinmez**; yıl-yıl kıyas için gün gün geçmiş korunur. `PRUNE_AFTER_DAYS>0` verilirse
 `snapshot_date − PRUNE_AFTER_DAYS` tarihinden eski ve **tamamlanmış** gönderilere ait ara ölçümler silinir.
 Korunan satırlar: gönderinin ilk ölçümü, her takvim ayındaki son ölçümü (ay sonu değeri), en son ölçümü
 (tamamlanma değeri). Bu üçlü sayesinde aylık "kazanılan" toplamları, ay sonu/güncel değerleri ve genel rapor
@@ -409,7 +410,7 @@ Konsol UTF-8'e zorlanır (`_utf8_console`), `pythonw` altında konsol handler ek
 | `TRACK_DAYS=45`, tarih bazlı sayfalama (sabit 200 gönderi yerine) | Hesaplar günde ~9 içerik atıyor; 200 gönderi 3 hafta bile değildi |
 | Tamamlanma kuralı `0.2`, min 3 gün | API maliyeti ve ölü veri; harfiyen %20 çoğu videoyu 2. gün kapatırdı |
 | Tamamlanma raporlarda görünmez, değer dondurulur | Kullanıcı kararı |
-| Budama 90 gün sonra, ilk+ay sonu+son korunur | Gün-gün sayfalar 3 ay tam kalsın, aylık toplamlar hiç değişmesin |
+| Budama kapalı (0) | Yıl-yıl kıyas için gün gün geçmiş; 30 hesapta ~100 MB/yıl, sorun değil |
 | Takipten önceki gönderiler kazanım üretmez | İlk gün "+38M kazanıldı" şişmesi görüldü |
 | Akşam mesajında bugünkü içerik / arşiv ayrımı | "Anlık patlayan içerik" görünür olsun |
 | Telegram bot long-polling, tek kopya kilidi | Sunucu/webhook yok; iki kopya Telegram'da çakışıyordu |
