@@ -116,6 +116,7 @@ IG-snapshot/
 | `CHANNEL_LOG_DAYS` | `90` | Kanal dosyasındaki gönderi×gün matrisinin genişliği |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | boş | Boşsa bildirim/bot sessizce devre dışı |
 | `TOKEN_WARN_DAYS` | `5` | Tokena bu kadar gün kalınca her gece ⚠️ |
+| `WEEKLY_FROM` | `2026-09-28` | Haftalık raporun ilk haftası (Pazartesi); öncesi gönderilmez |
 
 `config.py` bunları modül yüklenirken okur (`load_dotenv`), `save_env_value()` ile `.env` güncellenebilir
 (`IG_USER_ID`, `TELEGRAM_CHAT_ID`, yeni token). `track_cutoff()` → `(UTC şimdi − TRACK_DAYS)` → `"YYYY-MM-DD"`.
@@ -321,10 +322,17 @@ Yeni ayın ilk 10 gününde ilk başarılı snapshot'ta **bir kez** (`meta.month
 (takipçi Δ %, içerik R/F, kazanılan izlenme/beğeni), ayın en çok izlenen 5 gönderisi, Feed'de en çok beğenilen
 3, hesap bazında en iyi. Elle: `month-summary [--month] [--send]`.
 
-### 9.4 Çökme (`build_crash_message`)
+### 9.4 Haftalık rapor (`weekly.py`)
+Pazartesi→Pazar dönemi. Pazar gecesi 23:30 çekiminden sonra (Pazar çekimi kaçarsa Pzt/Salı telafi) iki mesaj:
+(1) hesap blokları — takipçi Δ, içerik R/F, kazanılan izlenme (haftanın içerikleri / arşiv), beğeni R/F, yorum,
+Reels ort. izlenme / Feed ort. beğeni, her satırda `↔` önceki haftayla kıyas (yüzde); (2) haftanın Reels top 5 /
+en kötü 5, Feed top 5 / en kötü 5. `meta.weekly_sent = "YYYY-Www"` tekrarını engeller; `WEEKLY_FROM` (Pazartesi)
+öncesi haftalar gönderilmez. Elle: `week-summary [--end YYYY-MM-DD] [--send]`.
+
+### 9.5 Çökme (`build_crash_message`)
 `run_snapshot` beklenmeyen hata verirse 🚨 mesajı gönderilir, hata yükseltilir (görev "başarısız" görünür).
 
-### 9.5 Bot (`bot.py`, `queries.py`)
+### 9.6 Bot (`bot.py`, `queries.py`)
 - `run_bot()`: `getUpdates(timeout=30)` döngüsü; `offset` ile ilerler; yalnız izinli chat; her mesaj →
   `queries.handle()` → `send`. Token bilgisi 12 saatte bir yenilenir. `data/bot.lock` üzerinde `msvcrt.locking`
   ile **tek kopya** garantisi (ikinci kopya "zaten çalışıyor" diyerek çıkar).
@@ -353,6 +361,7 @@ Yeni ayın ilk 10 gününde ilk başarılı snapshot'ta **bir kez** (`meta.month
 | `status` | Son çalışma, hesap başına son ölçüm/takipçi/hata |
 | `limit-test [hesaplar] [--calls N]` | Hesap başına çağrı maliyeti + yük testiyle saatlik tavan tahmini |
 | `telegram-test` | Bot doğrulama, chat id keşfi, test mesajı |
+| `week-summary [--end] [--send]` | Haftalık rapor (ekrana / Telegram'a) |
 | `month-summary [--month] [--send]` | Ay kapanış mesajı (ekrana / Telegram'a) |
 | `bot` | Sohbet botu (sürekli) |
 | `ask <metin>` | Bot cevabını Telegram'sız dene |
@@ -430,6 +439,7 @@ Mevcut altyapıda hazır olan parçalar:
   kazanılan izlenme/beğeni/yorum (aylık `DailyRow`'lardan toplanır).
 - `queries.posts_in_range(...)` → pencerede yayınlanan gönderiler (`PostPerf`: ilk gün / güncel / 24s Δ).
 - Bot zaten `son 7 gün`, `son 14 gün`, `son 30 gün` sorgularına cevap veriyor (Telegram metni olarak).
+- **Haftalık Telegram raporu** (21.09.2026'da eklendi) Pazar geceleri otomatik gidiyor; 7 günlük Excel ihtiyacını kısmen karşılar.
 
 Öneri taslağı (tartışmaya açık):
 - `reports/donem/` altında her gece üç dosya: `son7.xlsx`, `son14.xlsx`, `son30.xlsx` (+ `.md`), kayan pencere
@@ -446,6 +456,19 @@ Netleşmesi gereken sorular:
 3. Çıktı: Excel dosyaları mı, Telegram (bot komutu + haftalık otomatik mesaj) mı, ikisi mi?
 4. Önceki pencereyle kıyas ve yüzde değişim istenir mi?
 5. Üretim: her gece otomatik mi, istek üzerine mi? (Her gece maliyetsiz.)
+
+## 16. Veri biriktikten sonra tartışılacak konular (21.09.2026)
+
+Karar: aşağıdakiler birkaç haftalık gerçek ölçüm toplanmadan kurala bağlanmayacak.
+
+1. **Akşam atılan içerikler.** 23:30 çekiminde yayınlanalı 1–3 saat olmuş içerikler günün top / en kötü 5
+   listelerine tam günlük içeriklerle aynı kefede giriyor; izlenmeleri ertesi güne sarkıyor. Takip zaten sürdüğü
+   için veri kaybı yok, sorun değerlendirme zamanı. Aday çözümler: N saatten genç içerikleri listeden muaf tutmak,
+   "ilk 24 saat" normalizasyonu (yayın saatine göre), ertesi gün mesajında "dünkü içerikler bugün" bloğu, saat bazlı
+   beklenti eğrisi. Ölçüm kaynağı: `gunluk-*.xlsx` (ilk gün / güncel), kanal dosyalarındaki gönderi×gün matrisi.
+2. **Tamamlanma eşiği** (`STOP_RATIO`, `MIN_TRACK_DAYS`): kapanma yaşı dağılımı ve erken kapanan viral video var mı.
+3. **7 / 14 / 30 günlük Excel raporları** (§15); haftalık Telegram raporu ara çözüm.
+4. Rakip listesi gelince kapasite ve biz-vs-rakipler kıyas görünümleri.
 
 Diğer açık işler: README'ye yeni komutların eklenmesi (kullanıcı yönetiyor), kod değişikliklerinin commit'i,
 şefin rakip listesinin `[rakipler]` bölümüne girmesi ve kapasiteye göre `TRACK_DAYS`/`STOP_RATIO` gözden geçirme.

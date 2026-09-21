@@ -61,13 +61,25 @@ Bu dosya, sistemin **nasıl kurulduğunu adım adım** anlatır (ne yapıldı, n
 19. **Dokümantasyon:** `docs/SISTEM_DOKUMANI.md` (tam teknik döküman, 15 bölüm) ve bu günlük. Hafızaya proje
     durumu, 7/14/30 günlük rapor isteği ve tercihler kaydedildi.
 
+## 21 Eylül — Sorun analizi ve haftalık rapor
+
+20. **Bir hesap** 18.09'da kullanıcı adını değiştirmiş; 3 gece "Invalid user id".
+    Liste düzeltildi, geçmiş aynı `ig_id` üzerinden birleştirildi; bundan sonra ad değişimi otomatik tanınır,
+    hata metni anlaşılır ("hesap bulunamadı — kullanıcı adı değişmiş olabilir").
+21. **Akşam mesajı iki mesaja bölündü** ve telefon-dostu yapıldı: (1) hesap blokları (👥 📝 ▶️ ❤️ 💬, kısa sayılar
+    K/M, "bugünkü içerik / arşiv"), (2) günün Reels top 5 / en kötü 5, Feed top 5 / en kötü 5. "Veri kontrolü:
+    sorun yok" hatası (hesap alınamamışken) düzeltildi.
+22. Bot loglarında token maskelendi; ağ kesintisinde kademeli bekleme (15 sn → 5 dk).
+23. **Haftalık Telegram raporu** (`weekly.py`): Pazar 23:30 çekiminden sonra, Pazartesi→Pazar dönemi, önceki
+    haftayla kıyaslı; ilk rapor 04.10.2026 (28.09 haftası, `WEEKLY_FROM`). `week-summary` komutu.
+
 ---
 
 ## Şu anki durum
 
 | | |
 |---|---|
-| Otomasyon | "IG Snapshot" her gece 23:30 · "IG Bot" sürekli (oturum açılışında) |
+| Otomasyon | "IG Snapshot" her gece 23:30 · "IG Bot" sürekli · haftalık rapor Pazar geceleri (ilk: 04.10) · ay kapanışı ayın 1'i |
 | Hesaplar | 5 kendi hesabı (`[biz]`); rakipler şeften gelecek (`[rakipler]`) |
 | Token | Local Page token; expiry is checked at runtime and never published |
 | Çıktılar | `reports/YYYY-MM/` (rapor + gunluk + csv) · `reports/genel/` · `reports/kanallar/` · Telegram |

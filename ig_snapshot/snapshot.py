@@ -63,6 +63,12 @@ def store_account(conn, snapshot_date: date, username: str, data: dict,
     skip_ids: takibi tamamlanmış gönderiler — değerleri tamamlandığı günde dondurulur, yeni ölçüm yazılmaz."""
     profile = data.get("profile") or {}
     skip_ids = skip_ids or set()
+    # Kullanıcı adı değişmiş hesap: aynı ig_id başka bir adla kayıtlıysa geçmişi yeni ada taşı
+    if profile.get("id"):
+        existing = db.account_by_ig_id(conn, profile["id"])
+        if existing and existing["username"] != username:
+            db.rename_account(conn, existing["username"], username)
+            log.warning("@%s kullanıcı adını değiştirmiş → @%s; geçmiş birleştirildi", existing["username"], username)
     db.upsert_account(conn, username, profile.get("id"), profile.get("name"))
     db.upsert_profile_snapshot(
         conn, snapshot_date, username,
@@ -115,6 +121,18 @@ def evaluate_completion(conn, username: str, snapshot_date: date, cutoff: str) -
     if done:
         log.info("@%s — %d gönderinin takibi tamamlandı", username, done)
     return done
+
+
+def friendly_error(exc: GraphAPIError) -> str:
+    """API hatasını Telegram'da anlaşılır bir cümleye çevirir."""
+    if exc.code == 110 or exc.subcode == 2207013:
+        return ("hesap bulunamadı — kullanıcı adı değişmiş, hesap kişisele dönmüş ya da kapanmış olabilir; "
+                "accounts.txt'yi kontrol et")
+    if exc.code == 100 and "Unsupported get request" in exc.args[0]:
+        return "hesap bulunamadı ya da Business/Creator değil"
+    if exc.code == 190:
+        return "token geçersiz / süresi dolmuş"
+    return str(exc)
 
 
 def prune_old(conn, snapshot_date: date) -> int:
@@ -201,10 +219,10 @@ def run_snapshot(snapshot_date: date | None = None) -> dict:
                 failed[rest] = "rate limit nedeniyle atlandı"
             break
         except GraphAPIError as exc:
-            failed[username] = str(exc)
+            failed[username] = friendly_error(exc)
             log.error("[%d/%d] @%s — hata: %s", i, len(accounts), username, exc)
             with conn:
-                db.mark_account_error(conn, username, str(exc))
+                db.mark_account_error(conn, username, failed[username])
         if i < len(accounts):
             time.sleep(config.REQUEST_PAUSE)
             waited += wait_for_capacity(client)

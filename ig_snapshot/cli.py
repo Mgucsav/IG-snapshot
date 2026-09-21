@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from logging.handlers import RotatingFileHandler
 
 from . import config, db
@@ -160,9 +160,21 @@ def cmd_snapshot(args) -> int:
             conn.close()
         except Exception:  # noqa: BLE001
             log.exception("Öne çıkanlar / günlük kazanım hesaplanamadı")
-        sent = notify.send(notify.build_snapshot_message(result, token, result["elapsed"], result["waited"],
-                                                         highlights, gains))
+        msgs = notify.build_snapshot_messages(result, token, result["elapsed"], result["waited"], highlights, gains)
+        sent = all(notify.send(m) for m in msgs)
         print("Telegram bildirimi gönderildi." if sent else "Telegram bildirimi gönderilemedi (log'a bak).")
+        # Haftalık rapor: Pazar çekiminden sonra (kaçarsa Pzt/Salı), haftada bir
+        try:
+            from . import weekly
+            due = weekly.due_week(snapshot_date)
+            if due:
+                conn = db.connect()
+                try:
+                    weekly.send_weekly(conn, due[0], due[1], token)
+                finally:
+                    conn.close()
+        except Exception:  # noqa: BLE001
+            log.exception("Haftalık rapor gönderilemedi")
         # Ay kapanışı: yeni ayın ilk günlerinde, bir kez
         prev = report.prev_month(snapshot_date.strftime("%Y-%m"))
         if snapshot_date.day <= 10:
@@ -238,6 +250,48 @@ def send_month_end(month: str, force: bool) -> bool:
         conn.close()
 
 
+def cmd_week_summary(args) -> int:
+    """Haftalık raporu göster / gönder. --end verilmezse geçen tamamlanmış hafta."""
+    import re
+    from . import weekly
+
+    if args.end:
+        start, end = weekly.week_bounds(date.fromisoformat(args.end))
+    else:
+        today = date.today()
+        start, end = weekly.week_bounds(today - timedelta(days=7))
+    conn = db.connect()
+    try:
+        token = notify_token()
+        if args.send:
+            ok = weekly.send_weekly(conn, start, end, token, force=True)
+            print(f"{weekly.week_key(start)} ({start} → {end}) {'gönderildi' if ok else 'gönderilemedi / veri yok'}.")
+            return 0 if ok else 1
+        msgs = weekly.build_weekly_messages(conn, start, end, token)
+    finally:
+        conn.close()
+    if not msgs:
+        print(f"{start} → {end} için veri yok.")
+        return 1
+    for i, m in enumerate(msgs, 1):
+        print(f"── Mesaj {i} ──")
+        print(re.sub(r"<[^>]+>", "", m))
+        print()
+    print("(Göndermek için: --send)")
+    return 0
+
+
+def notify_token() -> dict:
+    from . import notify
+
+    if not config.ACCESS_TOKEN:
+        return {}
+    try:
+        return notify.token_status(GraphClient(config.ACCESS_TOKEN, config.GRAPH_VERSION))
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def cmd_month_summary(args) -> int:
     from . import report
 
@@ -270,10 +324,14 @@ def cmd_ask(args) -> int:
 
     conn = db.connect()
     try:
-        text = queries.handle(conn, " ".join(args.text))
+        msgs = queries.handle(conn, " ".join(args.text))
     finally:
         conn.close()
-    print(re.sub(r"<[^>]+>", "", text))
+    for i, m in enumerate(msgs, 1):
+        if len(msgs) > 1:
+            print(f"── Mesaj {i} ──")
+        print(re.sub(r"<[^>]+>", "", m))
+        print()
     return 0
 
 
@@ -438,6 +496,11 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("ask", help="Bir soruyu Telegram olmadan dene: ask dün feed")
     s.add_argument("text", nargs="+")
     s.set_defaults(func=cmd_ask)
+
+    s = sub.add_parser("week-summary", help="Haftalık raporu göster / Telegram'a gönder")
+    s.add_argument("--end", help="Haftanın herhangi bir günü (YYYY-MM-DD); varsayılan geçen hafta")
+    s.add_argument("--send", action="store_true", help="Telegram'a gönder (yoksa ekrana yazar)")
+    s.set_defaults(func=cmd_week_summary)
 
     s = sub.add_parser("month-summary", help="Ay kapanış mesajını göster / Telegram'a gönder")
     s.add_argument("--month", help="YYYY-MM, varsayılan bir önceki ay")

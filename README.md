@@ -1,332 +1,268 @@
 # IG Snapshot
 
-IG Snapshot is a Windows-based Instagram Business Discovery tracker. It collects daily public metrics for a configured list of Instagram Business and Creator accounts, stores historical measurements locally, and builds monthly and cross-month reports.
+IG Snapshot is a Windows-based Instagram competitor tracker built on the official Instagram Graph API
+(*Business Discovery*). Every night it collects public metrics for a configured list of Business/Creator
+accounts, stores the measurements locally in SQLite, rebuilds monthly / daily / per-account Excel reports,
+sends a Telegram summary, and answers ad-hoc questions through a Telegram bot ("what happened yesterday",
+"this week's reels", ...).
 
-The project is intended for content and competitor monitoring. It does not publish, modify, or automate activity on Instagram. It only reads data available through the Instagram Graph API and the permissions granted to the access token.
+It only **reads** data that the Graph API exposes for the granted token. It does not publish, like, follow, or
+automate any activity on Instagram. No external database or hosting is required; everything runs on one PC.
+
+Turkish technical documentation lives in [`docs/SISTEM_DOKUMANI.md`](docs/SISTEM_DOKUMANI.md) (architecture,
+data model, calculation semantics, decisions) and [`docs/CALISMA_GUNLUGU.md`](docs/CALISMA_GUNLUGU.md) (work log).
+
+---
 
 ## What it tracks
 
-For each monitored account, the application can store and report:
+For every monitored account, per day:
 
-- Daily follower, following, and total media counts
-- Reels and Feed content
-- Content types: photos, carousels, and videos
-- Views, likes, and comments when the API provides them
-- Publication date, caption, permalink, and media ID
-- Daily changes in follower counts
-- Daily changes in views, likes, and comments for tracked posts
-- Monthly totals and averages
-- Cross-month account history and cumulative growth
-- API errors, failed accounts, rate-limit pauses, and data-quality warnings
+- Followers, following and total media count
+- Each recent post's views, likes and comments (a new measurement row per post per day)
+- Post metadata: type (Reels / Photo / Carousel / Video), publish time, caption, permalink
 
-Stories are not collected. The API does not identify which post caused a follower change; the reports show the two measurements side by side so that relationship can be reviewed manually.
+Derived from those measurements:
 
-## How the data flow works
+- **Reels vs Feed** split everywhere (Feed = photos + carousels + feed videos)
+- **Gained** views / likes / comments per day, month, week — the growth of *all* tracked posts in the period
+- **Cohort** view — what the posts *published on a given day* have accumulated (first day / month end / current)
+- Cross-month history and cumulative follower growth, with charts
+- Data-quality warnings (missing posts, hidden likes, abnormal follower jumps, failed accounts)
 
-```text
-accounts.txt + .env
-        |
-        v
-  Instagram Graph API
-        |
-        v
-  snapshot command
-        |
-        v
-  data/ig_snapshot.db
-        |
-        +--> monthly Markdown, Excel, and CSV reports
-        +--> daily content cohort reports
-        +--> overall cross-month reports
-        +--> per-account channel workbooks
-        +--> optional Telegram summary
+Not available from the API: stories, saves, shares, reach, views for photos/carousels, and which post caused a
+follower change. Only Business and Creator accounts can be queried.
+
+---
+
+## How it works
+
+```
+Windows Task Scheduler
+ ├─ "IG Snapshot" (daily 23:30, catches up if the PC was off)
+ │    snapshot → SQLite → monthly + daily-cohort + overall + per-account reports
+ │             → Telegram evening summary (2 messages)
+ │             → Telegram weekly report (Sunday nights) and month-end summary (first days of a month)
+ └─ "IG Bot" (starts at logon, runs continuously, restarts on failure)
+      Telegram long polling → natural-language questions → answers built from the same database
 ```
 
-```mermaid
-flowchart LR
-      A[accounts.txt<br/>local target list] --> B[CLI and scheduler]
-      E[.env<br/>local credentials] --> B
-      B --> C[Instagram Graph API<br/>Business Discovery]
-      C --> D[snapshot.py]
-      D --> DB[(SQLite database<br/>data/ig_snapshot.db)]
-      DB --> R[Report builders]
-      R --> M[Monthly Markdown / Excel / CSV]
-      R --> O[Overall reports]
-      R --> W[Per-account workbooks]
-      D --> T[Optional Telegram notification]
-      classDef private fill:#fff3cd,stroke:#b58105,color:#3d2b00;
-      class A,E,DB,M,O,W private;
-```
+### Post tracking lifecycle
 
-Yellow nodes in the diagram are local runtime data. They are deliberately excluded from the public repository.
+1. A post is fetched nightly while it is younger than `TRACK_DAYS` (default 45). Pagination goes back only as
+   far as needed (posts are ordered newest first).
+2. When a post's daily gain drops below `STOP_RATIO` × the previous day's gain (after at least `MIN_TRACK_DAYS`
+   days), tracking stops and the post keeps its last value. This is an internal mechanism — reports never label
+   posts as "completed".
+3. After `PRUNE_AFTER_DAYS`, intermediate measurements of completed posts are deleted; the first measurement,
+   each month-end value and the final value are kept, so monthly totals never change.
 
-1. `accounts.txt` supplies the usernames to monitor. Usernames, `@handles`, and Instagram profile URLs are accepted.
-2. `.env` supplies the access token, Instagram account ID, API version, limits, and optional Telegram settings.
-3. `check` validates the token, discovers `IG_USER_ID` when it is empty, and runs a sample Business Discovery request.
-4. `snapshot` requests profile and media data for every configured account.
-5. The application upserts account, profile, media, media-measurement, and run records into SQLite.
-6. Unless `--no-report` is used, the current month, daily cohort, overall, and channel reports are regenerated.
-7. Optional Telegram notifications summarize the result and warn about failures, missing metrics, unusual follower changes, and token expiry.
+### Rate limits
+
+The Graph API applies per-app limits over a rolling hour (`X-App-Usage`). The client reads those headers after
+every call; when usage exceeds `USAGE_PAUSE_PCT` the run pauses (`USAGE_SLEEP_SEC`) and continues. Rate-limit
+errors are retried with exponential backoff; if they persist the remaining accounts are skipped until the next
+night. `python -m ig_snapshot limit-test` measures the actual per-call cost with your accounts.
+
+---
 
 ## Requirements
 
-- Windows and PowerShell
-- Python 3.10 or newer
-- An Instagram Graph API access token
-- An Instagram Business or Creator account connected to the token's Facebook Page access
-- Business Discovery access to the accounts being monitored
-
-Only professional accounts supported by Meta's Business Discovery endpoint can be queried. API permissions, account type, privacy settings, and Meta platform changes can affect which fields are returned.
+- Windows 10/11, Python 3.11+ (developed on 3.14)
+- A Meta app with the Instagram Graph API and a long-lived token (User or Page token) that can access an
+  Instagram Business/Creator account linked to a Facebook Page
+- Optional: a Telegram bot (via @BotFather) for notifications and the chat bot
 
 ## Installation
-
-Clone the public repository and create a virtual environment:
 
 ```powershell
 git clone https://github.com/Mgucsav/IG-snapshot.git
 cd IG-snapshot
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
-Copy-Item .env.example .env
+copy .env.example .env
 ```
 
-Create `accounts.txt` in the project root. It is intentionally not included in the public repository:
+1. Put the Instagram token into `.env` (`IG_ACCESS_TOKEN=`). Leave `IG_USER_ID` empty; `check` discovers it.
+2. List the accounts to monitor in `accounts.txt`, grouped:
 
-```text
-account_one
-@account_two
-https://www.instagram.com/account_three/
-```
+   ```
+   [biz]          # your own accounts
+   your_account
+   [rakipler]     # competitors
+   competitor_one
+   @competitor_two
+   https://www.instagram.com/competitor_three/
+   ```
+3. Validate:
 
-Comments after `#` are ignored and duplicate usernames are removed. The file is normalized to lowercase when it is loaded.
+   ```powershell
+   .venv\Scripts\python -m ig_snapshot check
+   ```
 
-## Configuration
+   Shows token validity and expiry, writes `IG_USER_ID`, and runs a trial query on the first account.
 
-Edit `.env` locally. Never paste real credentials into README files, source code, issues, or pull requests.
+### Telegram (optional)
 
-| Variable | Default | Required | Description |
-|---|---:|:---:|---|
-| `IG_ACCESS_TOKEN` | empty | Yes | Instagram Graph API access token |
-| `IG_USER_ID` | automatic | No | Your own Instagram professional account ID; `check` can discover it |
-| `FB_APP_ID` | empty | No | Meta application ID used for token refresh |
-| `FB_APP_SECRET` | empty | No | Meta application secret used for token refresh |
-| `GRAPH_API_VERSION` | `v25.0` | No | Graph API version |
-| `MEDIA_PAGE_SIZE` | `50` | No | Number of media records requested per API page |
-| `MEDIA_MAX` | `600` | No | Maximum media records fetched per account in one snapshot |
-| `TRACK_DAYS` | `45` | No | Only posts newer than this UTC age are fetched and measured |
-| `REQUEST_PAUSE` | `1.5` | No | Delay between account requests, in seconds |
-| `USAGE_PAUSE_PCT` | `70` | No | API usage level that triggers an automatic pause |
-| `USAGE_SLEEP_SEC` | `600` | No | Automatic pause duration, in seconds |
-| `CHANNEL_LOG_DAYS` | `90` | No | Number of days retained in channel workbook matrices |
-| `TELEGRAM_BOT_TOKEN` | empty | No | Telegram BotFather token; notifications are disabled when empty |
-| `TELEGRAM_CHAT_ID` | automatic | No | Chat ID found by `telegram-test` |
-| `TOKEN_WARN_DAYS` | `5` | No | Days before token expiry when warnings begin |
+1. Create a bot with @BotFather and put its token into `.env` (`TELEGRAM_BOT_TOKEN=`).
+2. Open the bot in Telegram and press *Start* (or add it to a group and post a message).
+3. `python -m ig_snapshot telegram-test` — discovers the chat id, stores it, sends a test message.
 
-`MEDIA_MAX` and `TRACK_DAYS` control API cost. A high media limit can require multiple pages and may trigger Meta usage limits. The application reads usage headers, pauses at the configured threshold, and retries rate-limit failures with backoff.
-
-## Verify the setup
-
-Run the configuration check before the first snapshot:
+### Scheduling
 
 ```powershell
-.venv\Scripts\python -m ig_snapshot check
+powershell -ExecutionPolicy Bypass -File scripts\register_task.ps1          # nightly snapshot at 23:30
+powershell -ExecutionPolicy Bypass -File scripts\register_task.ps1 -Time 22:00
+powershell -ExecutionPolicy Bypass -File scripts\register_bot.ps1           # Telegram bot (at logon)
+powershell -ExecutionPolicy Bypass -File scripts\register_bot.ps1 -Restart  # after updating the code
 ```
 
-The command reports:
+The PC must be on and the user logged in (a locked screen is fine). A missed nightly run executes when the PC
+comes back.
 
-- Whether the access token is valid and when it expires
-- Available token permissions
-- The configured or discovered Instagram professional account ID
-- The number of local target accounts
-- A sample Business Discovery response for the first target
+---
 
 ## Commands
 
-### Take a snapshot
+All commands: `.venv\Scripts\python -m ig_snapshot <command>`
 
-```powershell
-.venv\Scripts\python -m ig_snapshot snapshot
+| Command | Purpose |
+|---|---|
+| `check` | Validate the token, discover `IG_USER_ID`, trial query |
+| `snapshot [--date YYYY-MM-DD] [--no-report]` | The full nightly run |
+| `report [--month YYYY-MM] [--all] [--overall]` | Rebuild reports from the database |
+| `status` | Last run, per-account last measurement, errors |
+| `ask <text>` | Try a bot question without Telegram, e.g. `ask dün feed` |
+| `bot` | Run the Telegram bot in the foreground |
+| `week-summary [--end YYYY-MM-DD] [--send]` | Weekly report (print, or send to Telegram) |
+| `month-summary [--month YYYY-MM] [--send]` | Month-end summary (print, or send) |
+| `telegram-test` | Verify the bot, discover the chat id, send a test message |
+| `limit-test [accounts] [--calls N]` | Measure per-call cost and hourly capacity |
+| `token-refresh` | Exchange a still-valid long-lived token for a new one (`FB_APP_ID`/`FB_APP_SECRET`) |
+
+### Telegram bot questions (Turkish)
+
+| Question | Answer |
+|---|---|
+| `dün ne oldu`, `bugün`, `bu hafta`, `geçen ay`, `eylül`, `son 3 gün`, `2026-08` | Per-account blocks (followers, posts, gained views/likes/comments) grouped as "Biz / Rakipler", then Reels top 5 / worst 5 and Feed top 5 / worst 5 |
+| `dün feed`, `bu hafta reels`, `geçen hafta feed @account` | Posts of that period per account, then overall top 5 / worst 5 |
+| `durum` | Last run, accounts, token days left |
+
+---
+
+## Outputs
+
+```
+reports/
+  2026-09/
+    rapor-2026-09.md / .xlsx   monthly report: summary, Reels-Feed, types, daily, all posts
+    gunluk-2026-09.xlsx        daily cohort: per day and account, pivots with charts, posts
+                               (first day / month end / current / last-24h gain), highlights
+    icerikler-2026-09.csv      all posts published in the month (;-separated, UTF-8 BOM)
+  genel/
+    genel-rapor.md / .xlsx     cross-month history, follower growth chart, monthly views/likes charts
+  kanallar/
+    <account>.xlsx             per-account daily log, post×day view and like matrices, post list
 ```
 
-The command collects all accounts in `accounts.txt`, records the current date, updates the database, and generates reports. To collect historical data for a specific date without generating reports:
+Telegram:
 
-```powershell
-.venv\Scripts\python -m ig_snapshot snapshot --date 2026-09-17 --no-report
-```
+- **Evening summary** — message 1: one block per account (👥 followers, 📝 posts, ▶️ views gained with
+  "today's content / archive" split, ❤️ likes Reels/Feed, 💬 comments), failed accounts, data checks, token days;
+  message 2: today's Reels top 5 / worst 5 and Feed top 5 / worst 5.
+- **Weekly report** — Sunday after the nightly run (Monday→Sunday), same two-message layout with a comparison
+  to the previous week. First week controlled by `WEEKLY_FROM`.
+- **Month-end summary** — once, in the first days of a new month: account summaries and the month's top posts.
+- Alerts: token expiring in ≤ `TOKEN_WARN_DAYS` (daily), token invalid, run crashed.
 
-Use `--no-report` when testing collection or when reports will be generated separately.
+All report files are regenerated from the database every night (the current and the previous month). Editing
+them by hand is not preserved; a file open in Excel is skipped that night and logged.
 
-### Generate reports
+---
 
-```powershell
-# Current month, daily cohort, overall, and channel reports
-.venv\Scripts\python -m ig_snapshot report
+## Configuration (`.env`)
 
-# One month plus the overall report
-.venv\Scripts\python -m ig_snapshot report --month 2026-08
+| Key | Default | Meaning |
+|---|---|---|
+| `IG_ACCESS_TOKEN` | — | Graph API token (required) |
+| `IG_USER_ID` | auto | Your Instagram professional account id |
+| `FB_APP_ID`, `FB_APP_SECRET` | — | Only for `token-refresh` |
+| `GRAPH_API_VERSION` | `v25.0` | |
+| `MEDIA_PAGE_SIZE` | `50` | Posts per API call |
+| `MEDIA_MAX` | `600` | Hard cap of posts per account per run |
+| `TRACK_DAYS` | `45` | Posts are fetched while younger than this |
+| `STOP_RATIO` | `0.2` | Tracking stops when daily gain < ratio × previous day's gain |
+| `MIN_TRACK_DAYS` | `3` | Minimum age before a post can stop being tracked |
+| `PRUNE_AFTER_DAYS` | `90` | Intermediate measurements of stopped posts older than this are deleted |
+| `REQUEST_PAUSE` | `1.5` | Seconds between accounts |
+| `USAGE_PAUSE_PCT` | `70` | Pause when `X-App-Usage` exceeds this percentage |
+| `USAGE_SLEEP_SEC` | `600` | Pause length |
+| `CHANNEL_LOG_DAYS` | `90` | Width of the post×day matrices |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | — | Notifications and bot (silent if empty) |
+| `TOKEN_WARN_DAYS` | `5` | Daily warning when the token expires within this many days |
+| `WEEKLY_FROM` | — | First Monday for which the weekly report is sent |
 
-# Rebuild every month with stored data
-.venv\Scripts\python -m ig_snapshot report --all
+---
 
-# Rebuild only the cross-month overview
-.venv\Scripts\python -m ig_snapshot report --overall
-```
+## Data model (SQLite, `data/ig_snapshot.db`)
 
-### Inspect status
+| Table | Row | Purpose |
+|---|---|---|
+| `accounts` | account | id, name, last success / error |
+| `profile_snapshots` | account × day | followers, following, media count |
+| `media` | post | type, publish time (local), caption, permalink, `completed_at` |
+| `media_snapshots` | post × day | views, likes, comments |
+| `runs` | run | timing and result |
+| `meta` | key | e.g. last weekly / month-end message sent |
 
-```powershell
-.venv\Scripts\python -m ig_snapshot status
-```
+Account renames are detected by the Instagram account id and merged automatically; the new handle still has to be
+written into `accounts.txt` because the API is queried by username.
 
-This shows the last run, successful and failed account counts, months with stored data, each account's latest measurement, follower count, tracked media count, and last error.
-
-### Measure API capacity
-
-```powershell
-.venv\Scripts\python -m ig_snapshot limit-test account_one account_two --calls 20
-```
-
-When no usernames are supplied, the command uses `accounts.txt`. It measures calls, elapsed time, recent posting rate, usage headers, and an approximate safe hourly capacity. This command consumes API capacity, so use it deliberately.
-
-### Telegram test and monthly summary
-
-```powershell
-.venv\Scripts\python -m ig_snapshot telegram-test
-.venv\Scripts\python -m ig_snapshot month-summary
-.venv\Scripts\python -m ig_snapshot month-summary --month 2026-08
-.venv\Scripts\python -m ig_snapshot month-summary --send
-```
-
-`telegram-test` discovers a chat ID when one is not configured and sends a test message. `month-summary` prints a month-closing summary and sends it only when `--send` is supplied.
-
-### Refresh a long-lived token
-
-```powershell
-.venv\Scripts\python -m ig_snapshot token-refresh
-```
-
-This requires `FB_APP_ID` and `FB_APP_SECRET`. If the token has already expired, create a new token through Meta's tools and replace `IG_ACCESS_TOKEN` in the local `.env`.
-
-## Generated files
-
-All generated files remain local and are ignored by Git.
-
-### SQLite database
-
-`data/ig_snapshot.db` contains:
-
-- `accounts`: monitored usernames, IDs, names, and last errors
-- `profile_snapshots`: daily follower, following, and media counts
-- `media`: post identity, type, caption, permalink, and publication data
-- `media_snapshots`: daily likes, comments, and views per post
-- `runs`: snapshot start, finish, success, failure, and notes
-- `meta`: application metadata
-
-### Monthly reports
-
-`reports/YYYY-MM/` contains:
-
-- `rapor-YYYY-MM.md`: readable monthly summary
-- `rapor-YYYY-MM.xlsx`: summary, Reels/Feed, content type, daily, and post sheets
-- `icerikler-YYYY-MM.csv`: semicolon-separated post export for spreadsheet tools
-- `gunluk-YYYY-MM.xlsx`: daily content cohorts, pivots, post performance, and highlights
-
-The daily cohort report measures the posts published on each day and shows their first measurement, current measurement, and recent 24-hour change.
-
-### Overall and channel reports
-
-- `reports/genel/genel-rapor.md`: account-by-month history and cumulative changes
-- `reports/genel/genel-rapor.xlsx`: cross-month tables and charts
-- `reports/kanallar/<account>.xlsx`: account-level daily history and post-by-day measurement matrices
-
-### Logs
-
-- `logs/ig_snapshot.log`: application log with API and processing details
-- `logs/task.log`: Windows Task Scheduler wrapper output
-
-## Automatic daily execution
-
-Register the Windows Task Scheduler job:
-
-```powershell
-.\scripts\register_task.ps1
-.\scripts\register_task.ps1 -Time 22:00
-.\scripts\register_task.ps1 -Remove
-```
-
-The default time is 23:30. The scheduled task runs `scripts\run_snapshot.bat`, which selects the virtual-environment Python executable when available and appends output to `logs\task.log`.
-
-If PowerShell execution policy blocks the registration script:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\register_task.ps1
-```
-
-## API limits and data limitations
-
-Meta applies rolling usage limits based on request count, processing time, and CPU usage. The application:
-
-- Requests media in pages
-- Limits the age and number of fetched posts
-- Waits between accounts
-- Reads `X-App-Usage` headers when available
-- Pauses when `USAGE_PAUSE_PCT` is reached
-- Retries transient rate-limit failures
-- Marks remaining accounts as skipped when a run cannot safely continue
-
-Returned metrics can be missing. For example, views may not be available for every Feed post, and likes or comments may be hidden. Missing values are preserved as missing rather than treated as zero in the reports.
-
-The API provides snapshots, not a complete historical archive from before the application started. Historical growth becomes more useful after multiple daily runs have been stored.
+---
 
 ## Public repository and private runtime data
 
-This GitHub repository is public and contains only reusable source code, scripts, documentation, requirements, and the empty `.env.example` template.
+This repository contains only source code, scripts, sanitized documentation, `requirements.txt` and the
+`.env.example` template. The following are ignored by `.gitignore` and must never be committed:
 
-The following files and directories are intentionally ignored:
+| Item | Reason |
+|---|---|
+| `.env` | Instagram token, Telegram token, chat id |
+| `accounts.txt` | Identifies the monitored accounts |
+| `data/` | SQLite history, control exports, bot lock |
+| `reports/` | Captions, links, metrics, generated workbooks |
+| `logs/` | Operational output (tokens are masked, but logs stay local) |
+| `.venv/`, `__pycache__/`, `.obsidian/` | Environment and editor state |
 
-- `.env` and all credential files
-- `accounts.txt`, which identifies the monitored accounts
-- `data/`, including the SQLite database and raw control exports
-- `reports/`, including captions, links, CSV files, and Excel workbooks
-- `logs/`, virtual environments, and Python cache files
-
-Do not commit access tokens, Telegram bot tokens, account lists, API responses, captions, generated reports, or logs. If a credential is ever exposed, revoke or rotate it immediately in Meta or Telegram.
-
-### What is public and what stays local
-
-| Item | Public repository | Local machine | Reason |
-|---|:---:|:---:|---|
-| Python source and scripts | Yes | Yes | Reusable application code |
-| `README.md` and `docs/` | Yes | Yes | Sanitized technical documentation |
-| `.env.example` | Yes | Yes | Empty configuration template |
-| `.env` | No | Yes | Contains credentials and runtime settings |
-| `accounts.txt` | No | Yes | Identifies monitored accounts |
-| `data/` | No | Yes | SQLite history and raw control exports |
-| `reports/` | No | Yes | Captions, links, metrics, and generated files |
-| `logs/` | No | Yes | Operational output and error details |
-| `.obsidian/` | No | Yes | Local editor and workspace state |
+If a credential is ever exposed, revoke or rotate it immediately (Meta: generate a new token; Telegram: `/revoke`
+in @BotFather) and update `.env`.
 
 ## Project structure
 
 ```text
 ig_snapshot/
-  api.py          Graph API client, pagination, usage headers, and retries
-  snapshot.py     Daily collection and database writes
-  report.py       Monthly Markdown, Excel, and CSV reports
-  overall.py      Cross-month account history and charts
-  daily_report.py Daily content cohort reports
-  channel_log.py  Per-account workbook generation
-  notify.py       Telegram messages and token warnings
-  db.py           SQLite schema and queries
-  content.py      Reels, Feed, and content type classification
-  limit_test.py   API capacity and rate-limit measurement
-  config.py       Environment variables and local paths
-  cli.py           Command-line interface
-scripts/          Task Scheduler registration and batch wrappers
+  api.py           Graph API client: pagination, stop conditions, usage headers, retries
+  snapshot.py      Nightly collection, completion rule, pruning, capacity pauses
+  report.py        Monthly calculation core (AccountReport) and rapor-YYYY-MM.* outputs
+  daily_report.py  Daily cohort workbook and today's highlights
+  overall.py       Cross-month history and charts
+  channel_log.py   Per-account workbooks
+  weekly.py        Weekly Telegram report
+  notify.py        Telegram delivery, evening / month-end / crash messages, token status
+  bot.py           Telegram long-polling bot (single instance)
+  queries.py       Question parsing and answers
+  limit_test.py    API capacity measurement
+  db.py            SQLite schema, migrations and queries
+  content.py       Content type classification (Reels / Feed)
+  config.py        .env and accounts.txt parsing
+  cli.py           Commands
+scripts/
+  run_snapshot.bat, run_report.bat, register_task.ps1, register_bot.ps1
+docs/
+  SISTEM_DOKUMANI.md (Turkish technical documentation), CALISMA_GUNLUGU.md (work log)
 ```
 
-## License and responsible use
+## Responsible use
 
-No license has been declared yet. Add a license before redistributing the project or accepting external contributions.
-
-Use the application responsibly and in accordance with Meta's platform terms, applicable privacy laws, and the rights of the accounts whose public content is being measured.
+Use this tool only with a token you are authorized to use and within Meta's Platform Terms. The data collected
+is public account data exposed by the Graph API; keep the local database and reports private.

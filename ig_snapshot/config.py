@@ -43,6 +43,13 @@ TELEGRAM_BOT_TOKEN = _env("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = _env("TELEGRAM_CHAT_ID")
 TOKEN_WARN_DAYS = int(_env("TOKEN_WARN_DAYS", "5"))          # tokena bu kadar gün kalınca her gün uyar
 
+# Haftalık Telegram raporu: bu tarihten (Pazartesi) önce başlayan haftalar için gönderilmez
+_wf = _env("WEEKLY_FROM")
+WEEKLY_FROM = None
+if _wf:
+    from datetime import date as _date
+    WEEKLY_FROM = _date.fromisoformat(_wf)
+
 
 def track_cutoff() -> str:
     """İzleme ufku: bu tarihten (UTC, 'YYYY-MM-DD') eski gönderiler artık çekilmez."""

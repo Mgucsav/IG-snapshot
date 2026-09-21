@@ -297,9 +297,12 @@ def highlights_today(conn, day: date, n: int = 5) -> dict[str, list[PostPerf]]:
     _, posts = build(conn, month)
     today = day.isoformat()
     todays = [p for p in posts if p.day == today]
-    reels = [p for p in todays if p.group == "Reels"]
-    feed = [p for p in todays if p.group == "Feed"]
+    reels = sorted([p for p in todays if p.group == "Reels"],
+                   key=lambda p: (p.last_views or 0, p.last_likes or 0), reverse=True)
+    feed = sorted([p for p in todays if p.group == "Feed"],
+                  key=lambda p: (p.last_likes or 0, p.last_comments or 0), reverse=True)
+    # en kötüler: en iyi listesine girmeyenler arasından en düşükler (çakışma olmasın)
     return {
-        "reels": sorted(reels, key=lambda p: (p.last_views or 0, p.last_likes or 0), reverse=True)[:n],
-        "feed": sorted(feed, key=lambda p: (p.last_likes or 0, p.last_comments or 0), reverse=True)[:n],
+        "reels": reels[:n], "reels_worst": list(reversed(reels[n:]))[:n],
+        "feed": feed[:n], "feed_worst": list(reversed(feed[n:]))[:n],
     }

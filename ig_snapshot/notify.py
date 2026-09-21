@@ -20,6 +20,12 @@ def enabled() -> bool:
     return bool(config.TELEGRAM_BOT_TOKEN and config.TELEGRAM_CHAT_ID)
 
 
+def mask(text: str) -> str:
+    """Hata metinlerinde bot tokenını gizler (requests istisnaları URL'yi içerir)."""
+    tok = config.TELEGRAM_BOT_TOKEN
+    return text.replace(tok, "***") if tok else text
+
+
 def esc(value) -> str:
     return html.escape(str(value), quote=False)
 
@@ -53,7 +59,7 @@ def send(text: str, chat_id: str | None = None) -> bool:
                                   "disable_web_page_preview": True})
         return True
     except (requests.RequestException, RuntimeError) as exc:
-        log.error("Telegram gönderilemedi: %s", exc)
+        log.error("Telegram gönderilemedi: %s", mask(str(exc)))
         return False
 
 
@@ -114,38 +120,58 @@ def _plus(n) -> str:
     return "–" if n is None else ("+" if n > 0 else "") + _fmt(n)
 
 
-def build_snapshot_message(result: dict, token: dict, elapsed_sec: float, waited_sec: int = 0,
-                           highlights: dict | None = None, gains: dict | None = None) -> str:
-    """gains: {username: DailyRow} — bugün kazanılan izlenme/beğeni/yorum (Reels/Feed ayrı)."""
+def short(n) -> str:
+    """Kısa sayı: 657 · 6,1K · 71,1K · 296K · 1,03M · 38,5M"""
+    if n is None:
+        return "–"
+    a = abs(n)
+    if a < 1000:
+        return f"{n:,}".replace(",", ".")
+    if a < 100_000:
+        v = f"{n / 1000:.1f}K"
+    elif a < 1_000_000:
+        v = f"{n / 1000:.0f}K"
+    elif a < 10_000_000:
+        v = f"{n / 1_000_000:.2f}M"
+    else:
+        v = f"{n / 1_000_000:.1f}M"
+    return v.replace(".", ",")
+
+
+def _sgn(n) -> str:
+    return "–" if n is None else ("+" if n > 0 else "") + short(n)
+
+
+def _post_line(i, p, metric: str) -> str:
+    cap = p.caption[:30].strip() + ("…" if len(p.caption) > 30 else "")
+    return f"{i}. <b>{metric}</b> · @{esc(p.username)} · <a href=\"{esc(p.permalink)}\">{esc(cap) or 'gönderi'}</a>"
+
+
+def build_snapshot_messages(result: dict, token: dict, elapsed_sec: float, waited_sec: int = 0,
+                            highlights: dict | None = None, gains: dict | None = None) -> list[str]:
+    """İki mesaj: (1) hesap blokları + kontrol + token, (2) günün top 5 / en kötü 5 listeleri."""
     ok, failed, stats = result["ok"], result["failed"], result.get("stats", {})
     gains = gains or {}
+    highlights = highlights or {}
     total = len(ok) + len(failed)
     day: date = result["date"]
     icon = "✅" if not failed else ("⚠️" if ok else "🚨")
-    saved_total = sum(s.get("saved", 0) for s in stats.values())
-    lines = [f"📸 <b>IG Snapshot — {day:%d.%m.%Y} {datetime.now():%H:%M}</b>",
-             f"{icon} {len(ok)}/{total} hesap · {_fmt(saved_total)} gönderi izlendi · {elapsed_sec / 60:.0f} dk"
-             + (f" (limit beklemesi {waited_sec // 60} dk)" if waited_sec else ""), ""]
 
+    # --- Mesaj 1: hesaplar ---------------------------------------------------
+    lines = [f"📸 <b>{day:%d.%m.%Y} — Günlük özet</b>",
+             f"{icon} {len(ok)}/{total} hesap alındı" + (f" · limit beklemesi {waited_sec // 60} dk" if waited_sec else "")]
     warnings: list[str] = []
     for u in ok:
         s = stats.get(u, {})
-        lines.append(
-            f"<b>@{esc(u)}</b>  {_fmt(s.get('followers'))} takipçi{_delta(s.get('followers_delta'))}"
-            f" · bugün {s.get('posts_today', 0)} içerik (R{s.get('reels_today', 0)}/F{s.get('feed_today', 0)})"
-        )
         g = gains.get(u)
+        lines += ["", f"▬ <b>@{esc(u)}</b>",
+                  f"👥 {_fmt(s.get('followers'))}{_delta(s.get('followers_delta'))}",
+                  f"📝 {s.get('posts_today', 0)} içerik · {s.get('reels_today', 0)} Reels · {s.get('feed_today', 0)} Feed"]
         if g is not None:
             gr, gf = g["by_group"]["Reels"], g["by_group"]["Feed"]
-            lines.append(
-                f"   ↳ izlenme: bugünkü içerik <b>{_plus(g['today_views'])}</b> · arşiv <b>{_plus(g['archive_views'])}</b>"
-                f" · toplam {_plus(gr.views_or_none)}"
-            )
-            lines.append(
-                f"   ↳ beğeni: bugünkü <b>{_plus(g['today_likes'])}</b> · arşiv <b>{_plus(g['archive_likes'])}</b>"
-                f" · toplam {_plus(g['total'].likes)} (R {_plus(gr.likes)} / F {_plus(gf.likes)})"
-                f" · yorum {_plus(g['total'].comments)}"
-            )
+            lines += [f"▶️ {_sgn(gr.views_or_none)} izlenme  (bugünkü {short(g['today_views'])} · arşiv {short(g['archive_views'])})",
+                      f"❤️ {_sgn(g['total'].likes)} beğeni  (Reels {short(gr.likes)} · Feed {short(gf.likes)})",
+                      f"💬 {_sgn(g['total'].comments)} yorum"]
         if s.get("saved", 0) == 0:
             warnings.append(f"@{esc(u)}: hiç gönderi gelmedi")
         if s.get("followers") is None:
@@ -159,37 +185,45 @@ def build_snapshot_message(result: dict, token: dict, elapsed_sec: float, waited
         if fd is not None and fol and abs(fd) > fol * 0.05:
             warnings.append(f"@{esc(u)}: takipçi bir günde {'+' if fd > 0 else ''}{_fmt(fd)} değişti (%{abs(fd) / fol * 100:.1f})")
     for u, err in failed.items():
-        lines.append(f"❌ <b>@{esc(u)}</b> — {esc(err)[:160]}")
-
-    def post_line(i, p, metric):
-        cap = esc(p.caption[:45]) + ("…" if len(p.caption) > 45 else "")
-        return (f"{i}. @{esc(p.username)} · <b>{metric}</b> · "
-                f"<a href=\"{esc(p.permalink)}\">{cap or 'gönderi'}</a>")
-
-    reels = (highlights or {}).get("reels") or []
-    feed = (highlights or {}).get("feed") or []
-    if reels:
-        lines += ["", "<b>🎬 Günün top 5 Reels</b> (bugün paylaşılanlar, izlenme)"]
-        lines += [post_line(i, p, f"{_fmt(p.last_views)} izlenme · {_fmt(p.last_likes)} beğeni")
-                  for i, p in enumerate(reels, 1)]
-    if feed:
-        lines += ["", "<b>🖼 Günün top 5 Feed</b> (bugün paylaşılanlar, beğeni)"]
-        lines += [post_line(i, p, f"{_fmt(p.last_likes)} beğeni · {_fmt(p.last_comments)} yorum · {esc(p.content_type)}")
-                  for i, p in enumerate(feed, 1)]
-
-    if warnings:
-        lines += ["", "<b>Veri kontrolü</b>"] + [f"⚠️ {w}" for w in warnings]
-    else:
-        lines += ["", "✅ Veri kontrolü: sorun yok"]
+        lines += ["", f"❌ <b>@{esc(u)}</b> — {esc(err)[:160]}"]
+        warnings.append(f"@{esc(u)} alınamadı")
 
     lines.append("")
+    if warnings:
+        lines += ["<b>⚠️ Veri kontrolü</b>"] + [f"• {w}" for w in warnings]
+    else:
+        lines.append("✅ Veri kontrolü: sorun yok")
     tw = token_warning(token)
     if tw:
         lines.append(tw)
     elif token.get("days") is not None:
-        lines.append(f"🔑 Token: {token['days']} gün kaldı ({token['expires']})")
-    lines.append(f"📁 reports/{day:%Y-%m} (rapor + gunluk) · reports/genel · reports/kanallar güncellendi")
-    return "\n".join(lines)
+        lines.append(f"🔑 Token {token['days']} gün · 📁 raporlar güncellendi")
+    else:
+        lines.append("📁 raporlar güncellendi")
+    msg1 = "\n".join(lines)
+
+    # --- Mesaj 2: günün en iyileri / en kötüleri --------------------------------
+    blocks = []
+    reels, reels_worst = highlights.get("reels") or [], highlights.get("reels_worst") or []
+    feed, feed_worst = highlights.get("feed") or [], highlights.get("feed_worst") or []
+    if reels:
+        blocks.append(["<b>🎬 Günün Reels top 5</b> (izlenme)"] +
+                      [_post_line(i, p, f"{short(p.last_views)} · {short(p.last_likes)}❤️") for i, p in enumerate(reels, 1)])
+    if reels_worst:
+        blocks.append(["<b>🎬 En kötü Reels 5</b> (izlenme)"] +
+                      [_post_line(i, p, f"{short(p.last_views)} · {short(p.last_likes)}❤️") for i, p in enumerate(reels_worst, 1)])
+    if feed:
+        blocks.append(["<b>🖼 Günün Feed top 5</b> (beğeni)"] +
+                      [_post_line(i, p, f"{short(p.last_likes)}❤️ · {short(p.last_comments)}💬") for i, p in enumerate(feed, 1)])
+    if feed_worst:
+        blocks.append(["<b>🖼 En kötü Feed 5</b> (beğeni)"] +
+                      [_post_line(i, p, f"{short(p.last_likes)}❤️ · {short(p.last_comments)}💬") for i, p in enumerate(feed_worst, 1)])
+    if not blocks:
+        return [msg1]
+    lines2 = [f"🏁 <b>{day:%d.%m.%Y} — Günün içerikleri</b> (bugün paylaşılanlar)"]
+    for b in blocks:
+        lines2 += [""] + b
+    return [msg1, "\n".join(lines2)]
 
 
 def build_crash_message(exc: BaseException) -> str:

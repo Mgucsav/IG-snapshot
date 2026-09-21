@@ -54,6 +54,7 @@ def run_bot() -> None:
     allowed = str(config.TELEGRAM_CHAT_ID)
     token_info = _token_info_cached()
     offset = None
+    failures = 0
     log.info("Bot başladı; chat %s dinleniyor", allowed)
     while True:
         try:
@@ -61,9 +62,16 @@ def run_bot() -> None:
             if offset is not None:
                 payload["offset"] = offset
             updates = notify._post("getUpdates", payload, timeout=POLL_TIMEOUT + 15)
+            if failures:
+                log.info("Telegram bağlantısı geri geldi (%d denemeden sonra)", failures)
+            failures = 0
         except (requests.RequestException, RuntimeError) as exc:
-            log.warning("getUpdates hatası: %s — 15 sn sonra tekrar", exc)
-            time.sleep(15)
+            failures += 1
+            wait = min(15 * failures, 300)  # ağ kesintisinde logu boğmamak için artan bekleme (en fazla 5 dk)
+            if failures <= 3 or failures % 20 == 0:
+                log.warning("getUpdates hatası (%d): %s — %d sn sonra tekrar",
+                            failures, notify.mask(f"{type(exc).__name__}: {exc}")[:160], wait)
+            time.sleep(wait)
             continue
         for upd in updates or []:
             offset = upd["update_id"] + 1
@@ -79,10 +87,11 @@ def run_bot() -> None:
             try:
                 conn = db.connect()
                 try:
-                    reply = queries.handle(conn, text, token_info())
+                    replies = queries.handle(conn, text, token_info())
                 finally:
                     conn.close()
             except Exception as exc:  # noqa: BLE001
                 log.exception("Cevap üretilemedi")
-                reply = f"⚠️ Cevap üretilemedi: {notify.esc(str(exc))[:200]}"
-            notify.send(reply, chat_id)
+                replies = [f"⚠️ Cevap üretilemedi: {notify.esc(str(exc))[:200]}"]
+            for reply in replies:
+                notify.send(reply, chat_id)

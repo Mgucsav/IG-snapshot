@@ -14,7 +14,7 @@ from datetime import date, timedelta
 
 from . import config, db
 from .content import group_of
-from .notify import esc
+from .notify import _delta, _sgn, esc, short
 from .report import MONTHS_TR, build_account_report, fmt, fmt_day, fmt_delta, fmt_pct, month_bounds
 from .daily_report import PostPerf, load_posts
 
@@ -205,57 +205,84 @@ def period_summary(conn, username: str, start: date, end: date) -> PeriodSummary
 
 # --- cevap ----------------------------------------------------------------------
 
-def _post_line(p: PostPerf, with_account: bool = True, idx: int | None = None) -> str:
-    cap = esc(p.caption[:45]) + ("…" if len(p.caption) > 45 else "")
+def _metric(p: PostPerf) -> str:
     if p.group == "Reels":
-        metric = f"{fmt(p.last_views)} izl · {fmt(p.last_likes)} beğ"
-    else:
-        metric = f"{fmt(p.last_likes)} beğ · {fmt(p.last_comments)} yor · {esc(p.content_type)}"
+        return f"{short(p.last_views)} · {short(p.last_likes)}❤️"
+    return f"{short(p.last_likes)}❤️ · {short(p.last_comments)}💬 · {esc(p.content_type)}"
+
+
+def _post_line(p: PostPerf, with_account: bool = True, idx: int | None = None) -> str:
+    cap = p.caption[:30].strip() + ("…" if len(p.caption) > 30 else "")
     head = f"{idx}. " if idx else "• "
     acc = f"@{esc(p.username)} · " if with_account else ""
-    return f"{head}{acc}<b>{metric}</b> · <a href=\"{esc(p.permalink)}\">{cap or 'gönderi'}</a>"
+    return f"{head}<b>{_metric(p)}</b> · {acc}<a href=\"{esc(p.permalink)}\">{esc(cap) or 'gönderi'}</a>"
 
 
 def _rank_key(p: PostPerf):
     return (p.last_views or 0, p.last_likes or 0) if p.group == "Reels" else (p.last_likes or 0, p.last_comments or 0)
 
 
-def answer(conn, q: Query) -> str:
+def _lists_message(title: str, posts: list[PostPerf], kinds: tuple[str, ...]) -> str | None:
+    """Top 5 / en kötü 5 blokları — günlük ve haftalık mesajlarla aynı yapı."""
+    blocks = []
+    for grp, icon, metric_name in (("Reels", "🎬", "izlenme"), ("Feed", "🖼", "beğeni")):
+        if grp not in kinds:
+            continue
+        ranked = sorted([p for p in posts if p.group == grp], key=_rank_key, reverse=True)
+        if not ranked:
+            continue
+        blocks.append([f"<b>{icon} {grp} top {min(TOP_N, len(ranked))}</b> ({metric_name})"] +
+                      [_post_line(p, idx=i) for i, p in enumerate(ranked[:TOP_N], 1)])
+        worst = list(reversed(ranked[TOP_N:]))[:TOP_N]
+        if worst:
+            blocks.append([f"<b>{icon} En kötü {grp} {len(worst)}</b>"] +
+                          [_post_line(p, idx=i) for i, p in enumerate(worst, 1)])
+    if not blocks:
+        return None
+    lines = [f"🏁 <b>{esc(title)}</b>"]
+    for b in blocks:
+        lines += [""] + b
+    return "\n".join(lines)
+
+
+def answer(conn, q: Query) -> list[str]:
+    """Günlük/haftalık mesajlarla aynı yapı: (1) hesap blokları, (2) top 5 / en kötü 5 listeleri."""
     groups = config.load_account_groups()
     usernames = q.accounts or list(groups) or [a["username"] for a in db.list_accounts(conn)]
     own = [u for u in usernames if groups.get(u) == "biz"]
     rivals = [u for u in usernames if groups.get(u) != "biz"]
     kind_label = {"Reels": "Reels", "Feed": "Feed", "all": "Genel özet"}[q.kind]
-    lines = [f"📅 <b>{esc(q.label)} — {kind_label}</b>"]
+    header = f"📅 <b>{esc(q.label)} — {kind_label}</b>"
 
     if q.kind == "all":
-        summaries = [period_summary(conn, u, q.start, q.end) for u in usernames]
-        summaries = [s for s in summaries if s]
-        if not summaries:
-            return lines[0] + "\nBu dönem için veri yok."
+        summaries = {u: period_summary(conn, u, q.start, q.end) for u in usernames}
+        if not any(summaries.values()):
+            return [header + "\nBu dönem için veri yok."]
+        lines = [header]
         for title, members in (("🏠 Biz", own), ("🏁 Rakipler", rivals)):
-            block = [s for s in summaries if s.username in members]
+            block = [(u, summaries[u]) for u in members if summaries.get(u)]
             if not block:
                 continue
             lines += ["", f"<b>{title}</b>"]
-            for s in block:
-                lines.append(
-                    f"<b>@{esc(s.username)}</b> {fmt(s.followers_end)} takipçi ({fmt_delta(s.followers_delta)}, {fmt_pct(s.followers_pct)})"
-                    f" · {s.posts_reels + s.posts_feed} içerik (R{s.posts_reels}/F{s.posts_feed})"
-                    f" · izlenme {fmt_delta(s.views)} · beğeni {fmt_delta(s.likes_reels + s.likes_feed)}"
-                    f" (R {fmt_delta(s.likes_reels)} / F {fmt_delta(s.likes_feed)}) · yorum {fmt_delta(s.comments)}"
-                )
+            for u, s in block:
+                lines += ["", f"▬ <b>@{esc(u)}</b>",
+                          f"👥 {fmt(s.followers_end)}{_delta(s.followers_delta)}",
+                          f"📝 {s.posts_reels + s.posts_feed} içerik · {s.posts_reels} Reels · {s.posts_feed} Feed",
+                          f"▶️ {_sgn(s.views)} izlenme",
+                          f"❤️ {_sgn(s.likes_reels + s.likes_feed)} beğeni  (Reels {short(s.likes_reels)} · Feed {short(s.likes_feed)})",
+                          f"💬 {_sgn(s.comments)} yorum"]
+        msgs = ["\n".join(lines)]
         posts = posts_in_range(conn, usernames, q.start, q.end, "all")
-        for title, grp in (("🎬 Top 5 Reels (izlenme)", "Reels"), ("🖼 Top 5 Feed (beğeni)", "Feed")):
-            top = sorted([p for p in posts if p.group == grp], key=_rank_key, reverse=True)[:TOP_N]
-            if top:
-                lines += ["", f"<b>{title}</b>"] + [_post_line(p, idx=i) for i, p in enumerate(top, 1)]
-        return "\n".join(lines)
+        m2 = _lists_message(f"{q.label} — içerikler", posts, ("Reels", "Feed"))
+        if m2:
+            msgs.append(m2)
+        return msgs
 
     posts = posts_in_range(conn, usernames, q.start, q.end, q.kind)
     if not posts:
-        return lines[0] + f"\nBu dönemde {kind_label} gönderisi yok."
+        return [header + f"\nBu dönemde {kind_label} gönderisi yok."]
     single_day = q.start == q.end
+    lines = [header]
     for title, members in (("🏠 Biz", own), ("🏁 Rakipler", rivals)):
         block = [p for p in posts if p.username in members]
         if not block:
@@ -266,19 +293,19 @@ def answer(conn, q: Query) -> str:
             if not mine:
                 continue
             if q.kind == "Reels":
-                tot = f"{fmt(sum(p.last_views or 0 for p in mine))} izlenme · {fmt(sum(p.last_likes or 0 for p in mine))} beğeni"
+                tot = f"{short(sum(p.last_views or 0 for p in mine))} izlenme · {short(sum(p.last_likes or 0 for p in mine))}❤️"
             else:
-                tot = f"{fmt(sum(p.last_likes or 0 for p in mine))} beğeni · {fmt(sum(p.last_comments or 0 for p in mine))} yorum"
-            lines.append(f"<b>@{esc(u)}</b> — {len(mine)} {kind_label} · {tot}")
-            if single_day:
-                lines += ["   " + _post_line(p, with_account=False) for p in mine[:LIST_CAP]]
-                if len(mine) > LIST_CAP:
-                    lines.append(f"   … +{len(mine) - LIST_CAP} gönderi daha")
-            else:
-                lines += ["   " + _post_line(p, with_account=False) for p in mine[:3]]
-    top = sorted(posts, key=_rank_key, reverse=True)[:TOP_N]
-    lines += ["", f"<b>🏆 Genel top {len(top)} (biz dahil)</b>"] + [_post_line(p, idx=i) for i, p in enumerate(top, 1)]
-    return "\n".join(lines)
+                tot = f"{short(sum(p.last_likes or 0 for p in mine))}❤️ · {short(sum(p.last_comments or 0 for p in mine))}💬"
+            lines += ["", f"▬ <b>@{esc(u)}</b> — {len(mine)} {kind_label} · {tot}"]
+            shown = mine[:LIST_CAP] if single_day else mine[:3]
+            lines += [_post_line(p, with_account=False) for p in shown]
+            if len(mine) > len(shown):
+                lines.append(f"… +{len(mine) - len(shown)} gönderi daha")
+    msgs = ["\n".join(lines)]
+    m2 = _lists_message(f"{q.label} — {kind_label} genel (biz dahil)", posts, (q.kind,))
+    if m2:
+        msgs.append(m2)
+    return msgs
 
 
 def status_text(conn) -> str:
@@ -295,14 +322,15 @@ def status_text(conn) -> str:
     return "\n".join(lines)
 
 
-def handle(conn, text: str, token_info: dict | None = None) -> str:
+def handle(conn, text: str, token_info: dict | None = None) -> list[str]:
+    """Bir soruya cevap: bir ya da iki Telegram mesajı."""
     t = _norm(text.strip())
     if t in ("durum", "/durum", "status", "/status"):
         out = status_text(conn)
         if token_info and token_info.get("days") is not None:
             out += f"\n🔑 Token: {token_info['days']} gün kaldı ({token_info['expires']})"
-        return out
+        return [out]
     q = parse(text)
     if q is None:
-        return HELP
+        return [HELP]
     return answer(conn, q)

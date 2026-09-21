@@ -191,6 +191,29 @@ def account_info(conn: sqlite3.Connection, username: str) -> sqlite3.Row | None:
     return conn.execute("SELECT * FROM accounts WHERE username = ?", (username,)).fetchone()
 
 
+def account_by_ig_id(conn: sqlite3.Connection, ig_id: str) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM accounts WHERE ig_id = ?", (ig_id,)).fetchone()
+
+
+def rename_account(conn: sqlite3.Connection, old: str, new: str) -> None:
+    """Kullanıcı adı değişen hesabın tüm geçmişini yeni ada taşır (aynı ig_id)."""
+    if old == new:
+        return
+    conn.execute("UPDATE OR IGNORE profile_snapshots SET username = ? WHERE username = ?", (new, old))
+    conn.execute("DELETE FROM profile_snapshots WHERE username = ?", (old,))  # aynı güne çakışan eski satırlar
+    conn.execute("UPDATE media SET username = ? WHERE username = ?", (new, old))
+    old_row = conn.execute("SELECT * FROM accounts WHERE username = ?", (old,)).fetchone()
+    if old_row:
+        conn.execute("""
+            INSERT INTO accounts (username, ig_id, name, first_seen, last_ok, last_error)
+            VALUES (?, ?, ?, ?, ?, NULL)
+            ON CONFLICT(username) DO UPDATE SET
+                first_seen = MIN(accounts.first_seen, excluded.first_seen),
+                ig_id = COALESCE(accounts.ig_id, excluded.ig_id)
+        """, (new, old_row["ig_id"], old_row["name"], old_row["first_seen"], old_row["last_ok"]))
+        conn.execute("DELETE FROM accounts WHERE username = ?", (old,))
+
+
 def profile_series(conn: sqlite3.Connection, username: str, start: str, end: str) -> list[sqlite3.Row]:
     return conn.execute("""
         SELECT * FROM profile_snapshots
