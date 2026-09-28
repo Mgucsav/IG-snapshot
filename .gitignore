@@ -16,3 +16,8 @@ logs/
 
 # Local Obsidian workspace state
 .obsidian/
+
+# Obsidian scratch files
+Untitled.md
+Untitled.canvas
+*.canvas
