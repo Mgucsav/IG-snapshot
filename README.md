@@ -9,8 +9,9 @@ sends a Telegram summary, and answers ad-hoc questions through a Telegram bot ("
 It only **reads** data that the Graph API exposes for the granted token. It does not publish, like, follow, or
 automate any activity on Instagram. No external database or hosting is required; everything runs on one PC.
 
-Turkish technical documentation lives in [`docs/SISTEM_DOKUMANI.md`](docs/SISTEM_DOKUMANI.md) (architecture,
-data model, calculation semantics, decisions) and [`docs/CALISMA_GUNLUGU.md`](docs/CALISMA_GUNLUGU.md) (work log).
+Turkish documentation: [`docs/NASIL_CALISIYOR.md`](docs/NASIL_CALISIYOR.md) (how it works — diagrams and
+pseudo-code, which data lives in which table), [`docs/SISTEM_DOKUMANI.md`](docs/SISTEM_DOKUMANI.md)
+(full technical reference) and [`docs/CALISMA_GUNLUGU.md`](docs/CALISMA_GUNLUGU.md) (work log).
 
 ---
 

@@ -1,5 +1,7 @@
 # IG Snapshot — Sistem Dokümanı
 
+Şema ve sözde-kodla anlatım için: `NASIL_CALISIYOR.md`.
+
 Sürüm: 18.09.2026 · Kod tabanı: `ig_snapshot/` (Python 3.14, Windows) · Bu doküman, projeyi hiç görmemiş bir
 geliştiricinin veya yapay zekâ ajanının **kodu okumadan** tüm işleyişi anlaması için yazılmıştır. Kod okunacaksa
 buradaki bölüm başlıkları modül adlarıyla eşleşir.
