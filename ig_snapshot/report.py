@@ -271,14 +271,17 @@ def build_account_report(conn, username: str, month: str, with_prev: bool = True
         last_val[mid] = tuple(cur[k] if cur[k] is not None else prev[k] for k in range(3))
         latest[mid] = s
 
-    # Bu ay yayınlanan gönderiler (son ölçülen değerleriyle)
+    # Bu ay yayınlanan gönderiler — NİHAİ değerleriyle (takibi bittiği gündeki değer; hâlâ izleniyorsa bugünkü).
+    # Ay sınırı içindeki son ölçüm değil: ay sonunda atılan bir video sonraki ay büyümeye devam ederse
+    # rapor onun ulaştığı nihai değeri gösterir.
+    final = db.latest_snapshot_per_media(conn, username)
     by_type = {t: TypeStats() for t in CONTENT_TYPES}
     by_group = {g: TypeStats() for g in GROUPS}
     posts: list[PostRow] = []
     for r in media_rows:
         if r["published_month"] != month:
             continue
-        s = latest.get(r["media_id"])
+        s = final.get(r["media_id"]) or latest.get(r["media_id"])
         views = s["view_count"] if s else None
         likes = s["like_count"] if s else None
         comments = s["comments_count"] if s else None

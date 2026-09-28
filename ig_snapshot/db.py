@@ -270,6 +270,31 @@ def media_baseline_before(conn: sqlite3.Connection, username: str, start: str) -
     return {r["media_id"]: r for r in rows}
 
 
+def latest_snapshot_per_media(conn: sqlite3.Connection, username: str) -> dict[str, sqlite3.Row]:
+    """Her gönderinin EN SON ölçümü (ay sınırından bağımsız).
+
+    Takibi biten gönderide bu, tamamlanma günündeki 'nihai' değerdir; hâlâ izlenen gönderide bugünkü değer.
+    Aylık rapor kohort metrikleri bunu kullanır: ayın gönderisi sonraki ay büyümeye devam etse bile
+    rapor nihai değeri gösterir.
+    """
+    rows = conn.execute("""
+        SELECT ms.* FROM media_snapshots ms
+        JOIN media m ON m.media_id = ms.media_id
+        WHERE m.username = ? AND ms.snapshot_date = (
+            SELECT MAX(x.snapshot_date) FROM media_snapshots x WHERE x.media_id = ms.media_id)
+    """, (username,)).fetchall()
+    return {r["media_id"]: r for r in rows}
+
+
+def months_with_active_media(conn: sqlite3.Connection) -> list[str]:
+    """Hâlâ izlenen (takibi bitmemiş) gönderisi olan yayın ayları — raporları yenilenmeli."""
+    rows = conn.execute("""
+        SELECT DISTINCT published_month AS m FROM media
+        WHERE completed_at IS NULL AND published_month IS NOT NULL ORDER BY m
+    """).fetchall()
+    return [r["m"] for r in rows]
+
+
 def media_count_tracked(conn: sqlite3.Connection, username: str) -> int:
     return conn.execute("SELECT COUNT(*) FROM media WHERE username = ?", (username,)).fetchone()[0]
 

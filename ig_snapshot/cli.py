@@ -130,9 +130,15 @@ def cmd_snapshot(args) -> int:
         raise
     if not args.no_report:
         month = snapshot_date.strftime("%Y-%m")
-        # Önceki ay da her gece yenilenir: gönderileri TRACK_DAYS boyunca ölçülmeye devam ettiği için
-        # "güncel" sütunları (sürüklenme) birikmeye devam eder; ay içi metrikler değişmez.
-        months = [month, report.prev_month(month)]
+        # Bu ay + önceki ay + hâlâ izlenen gönderisi olan her yayın ayı yeniden üretilir:
+        # gönderiler ömrü bitene kadar ölçüldüğü için nihai değerleri o ayın raporuna işlensin.
+        conn = db.connect()
+        try:
+            # sadece ölçüm verisi olan aylar rapor üretebilir (takip başlamadan önceki aylar atlanır)
+            active = set(db.months_with_active_media(conn)) & set(db.months_with_data(conn))
+        finally:
+            conn.close()
+        months = sorted({month, report.prev_month(month), *active}, reverse=True)
         for m in months:
             try:
                 report.generate(m)

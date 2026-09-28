@@ -25,7 +25,7 @@ bazlı, günlük-kohort) her gece Excel/Markdown olarak yeniden üretilir; Teleg
 | **Snapshot / ölçüm** | Bir gönderinin (veya profilin) belirli bir **gündeki** değerleri. `snapshot_date` = çalışmanın başladığı yerel tarih. Aynı gün ikinci çalışma üzerine yazar (tek kayıt/gün). |
 | **Reels / Feed** | `media_product_type == "REELS"` → Reels; geri kalan her şey (Fotoğraf, Carousel, eski feed videosu) → **Feed**. YouTube'daki Shorts/uzun video ayrımının karşılığı. |
 | **İçerik türü** | `Reels`, `Fotoğraf` (IMAGE), `Carousel` (CAROUSEL_ALBUM), `Video` (VIDEO+FEED), `Diğer`. |
-| **Ay paylaşımları** | O ay **yayınlanan** gönderiler ve onların ay içindeki **son ölçülen** değerleri (kohort mantığı). |
+| **Ay paylaşımları** | O ay **yayınlanan** gönderiler ve onların **nihai** değerleri: takibi bittiği gündeki değer (hâlâ izleniyorsa bugünkü). Ömrü sonraki aya taşan gönderi de ulaştığı son değerle sayılır. |
 | **Kazanılan** | Bir dönemde, takip edilen **tüm** gönderilerin (eski paylaşımlar dahil) ölçülen **artışı** (bugün − dün toplamı). Kanalın o dönemki gerçek performansı. |
 | **Kohort** | "O gün yayınlanan içerikler" kesiti; `gunluk-YYYY-MM.xlsx` bu kesittir. |
 | **İlk gün değeri** | Gönderinin ilk ölçümü (yayın günü 23:30 ≈ ilk 12–24 saat). |
@@ -253,7 +253,8 @@ gezilir; her gönderi için "önceki değer" şöyle tohumlanır:
 Her ölçümde `max(0, cur − prev)` ilgili günün **Reels/Feed** kovasına eklenir; `views_seen` o kovada hiç izlenme
 ölçülüp ölçülmediğini tutar (`views_or_none` → Feed'de "–" gösterimi).
 
-**Ay paylaşımları:** `published_month == ay` olan gönderiler; her biri için ay içindeki **son** ölçüm alınır;
+**Ay paylaşımları:** `published_month == ay` olan gönderiler; her biri için **en son (nihai)** ölçüm alınır
+(`db.latest_snapshot_per_media`; ay sınırından bağımsız, gönderi ömrünü sonraki ayda tamamlasa da nihai değer kullanılır);
 `TypeStats` (count, views/likes/comments toplam + "bilinen" sayaçları → ortalamalar) tür ve grup bazında.
 
 **Günlük satırlar (`DailyRow`):** gün kümesi = profil günleri ∪ paylaşım günleri ∪ kazanım günleri;
@@ -299,9 +300,9 @@ izlenme/beğeni R/F, yorum, izlenen gönderi sayısı; takipçi grafiği), `İzl
 (gönderi × gün matrisi, son `CHANNEL_LOG_DAYS`), `Gönderiler` (son değerler).
 
 ### 8.5 Üretim zamanı
-Her snapshot sonunda: **bu ay + önceki ay** (rapor + gunluk) → genel → kanallar. Önceki ayın yenilenme sebebi:
-gönderiler ay bittikten sonra da ölçüldüğü için `gunluk` dosyasındaki güncel/sürüklenme sütunları birikir; ay içi
-metrikler değişmez. Elle: `report [--month] [--all] [--overall]`.
+Her snapshot sonunda: **bu ay + önceki ay + hâlâ izlenen gönderisi olan her yayın ayı** (rapor + gunluk) → genel →
+kanallar. Sebep: gönderiler ömrü bitene kadar ölçülür; nihai değerleri yayınlandıkları ayın raporuna işlenmelidir.
+Bir ayın tüm gönderilerinin takibi bitince o ayın raporu sabitlenir ve bir daha değişmez. Elle: `report [--month] [--all] [--overall]`.
 
 ---
 

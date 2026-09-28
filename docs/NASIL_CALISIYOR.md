@@ -174,6 +174,8 @@ Yıllık tahmin (30 hesap): ~100 MB.
       │                                      ⇒ completed_at = Pazar   TAKİP BİTTİ
       ▼
  Bundan sonra: API'ye sorulmaz, yeni satır yazılmaz, değeri 578.000 olarak sabit kalır.
+ Bu 578.000, gönderinin yayınlandığı AYIN raporunda 'nihai izlenme' olarak yer alır — ömrü sonraki aya
+ taşmış olsa bile. Ay raporu, o ayın hâlâ izlenen gönderisi kalmayana kadar her gece yenilenir; sonra sabitlenir.
  Tüm 7 ölçüm veritabanında durur (silinmez) → gün gün geçmiş korunur.
 ```
 
@@ -212,7 +214,7 @@ def omru_doldu(gonderi):
 | Telegram günün top 5 / en kötü 5 | **Kohort** (bugün yayınlananlar) |
 | `gunluk-YYYY-MM.xlsx` | **Kohort** (gün × hesap; ilk gün / ay sonu / güncel) |
 | Aylık rapordaki "kazanılan izlenme/beğeni" | **Kazanılan** |
-| Aylık rapordaki "ay paylaşımları" | **Kohort** |
+| Aylık rapordaki "ay paylaşımları" | **Kohort — nihai değerle** (gönderi ömrü sonraki aya taşsa da ulaştığı son değer) |
 | Haftalık rapor ▶️ / ❤️ | **Kazanılan** (+ parantezde haftanın içerikleri = kohort) |
 
 Kazanılan hesabı (kaba kod):
