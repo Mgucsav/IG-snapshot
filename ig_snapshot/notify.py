@@ -99,8 +99,9 @@ def token_warning(status: dict) -> str | None:
                 "Graph API Explorer → yeni token → Access Token Debugger → Extend → .env IG_ACCESS_TOKEN")
     days = status.get("days")
     if days is not None and days <= config.TOKEN_WARN_DAYS:
-        return (f"⚠️ <b>Instagram tokenı {days} gün sonra bitiyor</b> ({status['expires']}). "
-                f"Yenile: Graph API Explorer → token → Debugger'da <i>Extend Access Token</i> → .env")
+        return (f"⚠️ <b>Instagram tokenı {days} gün sonra bitiyor</b> ({status['expires']}).\n"
+                f"Kalıcı çözüm: Graph API Explorer'dan kullanıcı tokenı al → .env'e FB_USER_TOKEN yaz → "
+                f"<code>python -m ig_snapshot token-setup</code> (süresiz sayfa tokenı üretir).")
     return None
 
 

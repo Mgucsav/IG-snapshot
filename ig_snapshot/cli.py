@@ -443,6 +443,74 @@ def cmd_status(args) -> int:
     return 0
 
 
+def cmd_token_setup(args) -> int:
+    """Süresiz Page tokenı kurar: kısa ömürlü kullanıcı tokenı → uzun ömürlü kullanıcı tokenı → sayfa tokenı.
+
+    Kullanım: Graph API Explorer'dan alınan kullanıcı tokenını .env'e FB_USER_TOKEN= olarak yapıştır,
+    FB_APP_ID / FB_APP_SECRET'i doldur, sonra bu komutu çalıştır.
+    """
+    from . import notify
+
+    user_token = config._env("FB_USER_TOKEN")
+    if not (config.APP_ID and config.APP_SECRET):
+        print(".env içinde FB_APP_ID ve FB_APP_SECRET gerekli.")
+        print("  Meta uygulama paneli → Ayarlar → Temel → Uygulama Kimliği ve Uygulama Gizli Anahtarı")
+        return 1
+    if not user_token:
+        print(".env içinde FB_USER_TOKEN yok.")
+        print("  Graph API Explorer → uygulamayı seç → User Token → izinler: instagram_basic,")
+        print("  instagram_manage_insights, pages_show_list, pages_read_engagement → Generate Access Token")
+        print("  Çıkan tokenı .env dosyasına FB_USER_TOKEN=... olarak yapıştırıp bu komutu tekrar çalıştır.")
+        return 1
+
+    client = GraphClient(user_token, config.GRAPH_VERSION)
+    try:
+        data = client.exchange_long_lived(config.APP_ID, config.APP_SECRET)
+        long_token = data.get("access_token")
+        if not long_token:
+            print(f"Uzun ömürlü kullanıcı tokenı alınamadı: {data}")
+            return 1
+        print("1/3 Uzun ömürlü kullanıcı tokenı alındı (60 gün).")
+
+        long_client = GraphClient(long_token, config.GRAPH_VERSION)
+        pages = long_client.list_pages_with_tokens()
+        if not pages:
+            print("Bu kullanıcının eriştiği Facebook sayfası bulunamadı.")
+            return 1
+        print(f"2/3 {len(pages)} sayfa bulundu:")
+        chosen = None
+        for p in pages:
+            ig = p.get("instagram_business_account") or {}
+            mark = ""
+            if ig.get("id") and (not config.IG_USER_ID or ig["id"] == config.IG_USER_ID):
+                if chosen is None:
+                    chosen, mark = p, "  ← kullanılacak"
+            print(f"   {p.get('name')} → Instagram @{ig.get('username') or '-'} (id {ig.get('id') or '-'}){mark}")
+        if not chosen or not chosen.get("access_token"):
+            print("Instagram profesyonel hesabına bağlı sayfa bulunamadı.")
+            return 1
+
+        page_token = chosen["access_token"]
+        status = notify.token_status(GraphClient(page_token, config.GRAPH_VERSION))
+        config.save_env_value("IG_ACCESS_TOKEN", page_token)
+        config.ACCESS_TOKEN = page_token
+        ig_id = (chosen.get("instagram_business_account") or {}).get("id")
+        if ig_id:
+            config.save_env_value("IG_USER_ID", ig_id)
+            config.IG_USER_ID = ig_id
+        config.save_env_value("FB_USER_TOKEN", "")  # tek kullanımlık, .env'de bırakma
+        print("3/3 Sayfa tokenı .env dosyasına yazıldı (FB_USER_TOKEN temizlendi).")
+        if status.get("days") is None:
+            print("✅ Yeni token SÜRESİZ — artık 60 günde bir yenilemek gerekmiyor.")
+        else:
+            print(f"⚠️ Yeni token {status['days']} gün geçerli ({status['expires']}).")
+            print("   Süresiz olması için kullanıcı tokenının uzun ömürlü olması gerekir; adımları tekrar kontrol et.")
+    except GraphAPIError as exc:
+        print(f"HATA: {exc}")
+        return 1
+    return 0
+
+
 def cmd_token_refresh(args) -> int:
     if not (config.APP_ID and config.APP_SECRET):
         print(".env içinde FB_APP_ID ve FB_APP_SECRET gerekli (Meta uygulama ayarları → Temel).")
@@ -520,6 +588,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("usernames", nargs="*", help="Test edilecek kullanıcı adları (boşsa accounts.txt)")
     s.add_argument("--calls", type=int, default=20, help="Yük testindeki ardışık çağrı sayısı (varsayılan 20)")
     s.set_defaults(func=cmd_limit_test)
+
+    s = sub.add_parser("token-setup", help="Süresiz sayfa tokenı kur (FB_USER_TOKEN + FB_APP_ID/SECRET gerekir)")
+    s.set_defaults(func=cmd_token_setup)
 
     s = sub.add_parser("token-refresh", help="Uzun ömürlü tokenı yenile (FB_APP_ID/SECRET gerekir)")
     s.set_defaults(func=cmd_token_refresh)

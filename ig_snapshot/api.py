@@ -154,6 +154,18 @@ class GraphClient:
                 out.append({"page": page.get("name"), "ig_id": ig["id"], "ig_username": ig.get("username")})
         return out
 
+    def list_pages_with_tokens(self) -> list[dict]:
+        """Kullanıcı tokenıyla erişilen sayfalar ve HER SAYFANIN KENDİ TOKENI.
+
+        Uzun ömürlü bir kullanıcı tokenıyla çağrılırsa dönen sayfa tokenları süresizdir
+        (Meta: "Long-lived Page access tokens do not have an expiration date").
+        """
+        data = self.get("me/accounts", {
+            "fields": "name,access_token,instagram_business_account{id,username}",
+            "limit": 100,
+        })
+        return data.get("data", [])
+
     def exchange_long_lived(self, app_id: str, app_secret: str) -> dict:
         """Mevcut (hâlâ geçerli) uzun ömürlü tokenı yeni bir 60 günlük tokenla değiştirir."""
         return self.get("oauth/access_token", {
