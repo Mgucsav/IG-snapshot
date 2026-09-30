@@ -77,7 +77,8 @@ Telegram üzerinden "dün ne oldu", "bu hafta reels" gibi sorular anında cevapl
 Her ay bittiğinde, yeni ayın ilk gecesinde biten ayın **ham verisi otomatik olarak dışa aktarılır**:
 
 ```
-IG-snapshoteports\disa-aktarim6-09    profil-olcumleri.csv       her hesabın her günkü takipçi sayısı
+IG-snapshot\reports\disa-aktarim\2026-09\
+    profil-olcumleri.csv       her hesabın her günkü takipçi sayısı
     gonderiler.csv             o ay yayınlanan tüm içerikler ve ulaştıkları nihai değerler
     gonderi-olcumleri.csv      gün gün tüm ölçümler (ham veri)
     veri-2026-09.xlsx          aynı üç tablo tek Excel dosyasında
