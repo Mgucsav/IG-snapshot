@@ -72,6 +72,22 @@ Ham veriden her gece otomatik olarak üretilen dosyalar (`IG-snapshot\reports`):
 Ayrıca her gece Telegram'a özet mesaj, her Pazar haftalık rapor, her ay başı ay kapanışı gönderiliyor;
 Telegram üzerinden "dün ne oldu", "bu hafta reels" gibi sorular anında cevaplanıyor.
 
+### Ay sonunda veriye erişim
+
+Her ay bittiğinde, yeni ayın ilk gecesinde biten ayın **ham verisi otomatik olarak dışa aktarılır**:
+
+```
+IG-snapshoteports\disa-aktarim6-09    profil-olcumleri.csv       her hesabın her günkü takipçi sayısı
+    gonderiler.csv             o ay yayınlanan tüm içerikler ve ulaştıkları nihai değerler
+    gonderi-olcumleri.csv      gün gün tüm ölçümler (ham veri)
+    veri-2026-09.xlsx          aynı üç tablo tek Excel dosyasında
+    ig_snapshot-20261001.db    veritabanının o günkü dondurulmuş kopyası (aylık arşiv)
+    OKUBENI.txt                sütun açıklamaları
+```
+
+Bu klasör olduğu gibi kopyalanabilir, e-postayla gönderilebilir, başka bir analistin eline verilebilir.
+İstenildiği an elle de alınabilir: `python -m ig_snapshot export --month 2026-09 --db`
+
 **Önemli:** Raporlar veritabanından her gece yeniden üretilir. Bir rapor silinse bile veri kaybolmaz;
 istenen her dönem için istenen formatta rapor tekrar üretilebilir.
 

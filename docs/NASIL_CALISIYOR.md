@@ -337,6 +337,24 @@ Yeni adı `accounts.txt`'ye **senin** yazman gerekir (API eski adı bulamaz); ak
 
 ---
 
+## 8b. Veriyi dışa aktarma (inceleme / arşiv)
+
+```
+ python -m ig_snapshot export --month 2026-09 --db
+             │
+             ▼
+ reports/disa-aktarim/2026-09/
+   ├─ profil-olcumleri.csv      hesap × gün: takipçi, takip edilen, toplam gönderi
+   ├─ gonderiler.csv            o ay yayınlananlar + nihai izlenme/beğeni/yorum
+   ├─ gonderi-olcumleri.csv     GÜN GÜN ham ölçümler (asıl veri)
+   ├─ veri-2026-09.xlsx         aynı üç tablo tek Excel'de
+   ├─ ig_snapshot-YYYYMMDD.db   veritabanının dondurulmuş kopyası (arşiv)
+   └─ OKUBENI.txt               sütun açıklamaları
+```
+
+`--all` tüm veriyi, `--month` tek ayı aktarır. **Ay bitince** (yeni ayın ilk çalışmasında) biten ay
+otomatik olarak, veritabanı kopyasıyla birlikte, bir kez aktarılır (`meta.month_export_done`).
+
 ## 9. Ayar düğmeleri (`.env`)
 
 | Ayar | Şu an | Ne yapar |

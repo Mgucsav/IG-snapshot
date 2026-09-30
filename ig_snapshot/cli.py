@@ -188,6 +188,12 @@ def cmd_snapshot(args) -> int:
                 send_month_end(prev, force=False)
             except Exception:  # noqa: BLE001
                 log.exception("Ay kapanış mesajı gönderilemedi")
+    # Biten ayın ham verisi + veritabanı kopyası bir kez dışa aktarılır (arşiv/inceleme için)
+    if snapshot_date.day <= 10:
+        try:
+            export_month_once(report.prev_month(snapshot_date.strftime("%Y-%m")))
+        except Exception:  # noqa: BLE001
+            log.exception("Ay sonu dışa aktarımı yapılamadı")
     return 0 if not result["failed"] or result["ok"] else 1
 
 
@@ -415,6 +421,42 @@ def cmd_report(args) -> int:
     return 0
 
 
+def export_month_once(month: str) -> bool:
+    """Biten ayın ham verisini + veritabanı kopyasını bir kez dışa aktarır (meta ile işaretlenir)."""
+    from . import export
+
+    conn = db.connect()
+    try:
+        if db.get_meta(conn, "month_export_done") == month:
+            return False
+        out = export.generate(month, include_db=True, conn=conn)
+        if not out:
+            return False
+        with conn:
+            db.set_meta(conn, "month_export_done", month)
+    finally:
+        conn.close()
+    log.info("Ay sonu dışa aktarımı hazır: %s", out["dir"])
+    return True
+
+
+def cmd_export(args) -> int:
+    """Ham veriyi CSV + Excel olarak dışa aktar."""
+    from . import export, report
+
+    month = None if args.all else (args.month or date.today().strftime("%Y-%m"))
+    out = export.generate(month, include_db=args.db)
+    if not out:
+        print(f"{month or 'tüm veri'} için veri yok.")
+        return 1
+    s = out["sayilar"]
+    print(f"Dışa aktarıldı: {out['dir']}")
+    print(f"  {s['profil']} profil ölçümü · {s['gonderi']} gönderi · {s['olcum']} günlük ölçüm satırı")
+    for f in out["dosyalar"]:
+        print(f"  - {f}")
+    return 0
+
+
 def cmd_status(args) -> int:
     conn = db.connect()
     try:
@@ -560,6 +602,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--all", action="store_true", help="Veri olan tüm ayların raporunu yeniden üret")
     s.add_argument("--overall", action="store_true", help="Sadece genel (aylar arası) raporu üret")
     s.set_defaults(func=cmd_report)
+
+    s = sub.add_parser("export", help="Ham veriyi CSV + Excel olarak dışa aktar")
+    s.add_argument("--month", help="YYYY-MM (varsayılan içinde bulunulan ay)")
+    s.add_argument("--all", action="store_true", help="Tüm veriyi aktar")
+    s.add_argument("--db", action="store_true", help="Veritabanı dosyasının kopyasını da ekle (tam yedek)")
+    s.set_defaults(func=cmd_export)
 
     s = sub.add_parser("status", help="Veritabanı ve hesap durumu")
     s.set_defaults(func=cmd_status)

@@ -134,6 +134,7 @@ All commands: `.venv\Scripts\python -m ig_snapshot <command>`
 | `snapshot [--date YYYY-MM-DD] [--no-report]` | The full nightly run |
 | `report [--month YYYY-MM] [--all] [--overall]` | Rebuild reports from the database |
 | `status` | Last run, per-account last measurement, errors |
+| `export [--month YYYY-MM] [--all] [--db]` | Raw data dump: CSV + Excel (+ a copy of the database) |
 | `ask <text>` | Try a bot question without Telegram, e.g. `ask dün feed` |
 | `bot` | Run the Telegram bot in the foreground |
 | `week-summary [--end YYYY-MM-DD] [--send]` | Weekly report (print, or send to Telegram) |
@@ -165,7 +166,16 @@ reports/
     genel-rapor.md / .xlsx     cross-month history, follower growth chart, monthly views/likes charts
   kanallar/
     <account>.xlsx             per-account daily log, post×day view and like matrices, post list
+  disa-aktarim/2026-09/
+    profil-olcumleri.csv       raw: followers per account per day
+    gonderiler.csv             raw: posts published in the period with their final values
+    gonderi-olcumleri.csv      raw: every daily measurement (post × day)
+    veri-2026-09.xlsx          the same three tables in one workbook
+    ig_snapshot-YYYYMMDD.db    a frozen copy of the database (monthly archive)
 ```
+
+When a month ends, the first nightly run of the new month exports the finished month automatically
+(raw CSV/Excel plus a database copy) — once, tracked in the `meta` table.
 
 Telegram:
 
