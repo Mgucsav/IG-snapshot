@@ -36,7 +36,8 @@ def setup_logging(verbose: bool = False) -> None:
     logging.getLogger("urllib3").setLevel(logging.WARNING)
 
 
-def _print_token_info(client: GraphClient) -> bool:
+def _print_token_info(client: GraphClient) -> dict:
+    """Token künyesini yazar ve ham bilgiyi döner. Uygulama kimliğini .env'e kaydeder."""
     info = client.debug_token()
     valid = bool(info.get("is_valid"))
     exp = info.get("expires_at") or 0
@@ -54,9 +55,16 @@ def _print_token_info(client: GraphClient) -> bool:
     missing = needed - set(scopes)
     if scopes and missing:
         print(f"UYARI: eksik izin(ler): {', '.join(sorted(missing))}")
-    if exp and days < 10:
-        print("UYARI: token 10 günden az kaldı. FB_APP_ID/FB_APP_SECRET tanımlıysa `token-refresh` çalıştır.")
-    return valid
+    # Uygulama kimliği tokenın içinde geliyor; elle girmeye gerek kalmasın
+    if info.get("app_id") and not config.APP_ID:
+        config.save_env_value("FB_APP_ID", str(info["app_id"]))
+        config.APP_ID = str(info["app_id"])
+        print(f"FB_APP_ID={info['app_id']} olarak .env dosyasına yazıldı (uygulama: {info.get('application')}).")
+    if exp and days <= config.TOKEN_WARN_DAYS * 4:
+        eksik = "FB_APP_SECRET" if not config.APP_SECRET else None
+        print(f"UYARI: token {days} gün sonra bitiyor. Süresiz tokena geçmek için `token-setup` çalıştır"
+              + (f" (önce .env içine {eksik} gir)." if eksik else "."))
+    return info
 
 
 def cmd_check(args) -> int:
@@ -66,7 +74,7 @@ def cmd_check(args) -> int:
     client = GraphClient(config.ACCESS_TOKEN, config.GRAPH_VERSION)
 
     try:
-        if not _print_token_info(client):
+        if not _print_token_info(client).get("is_valid"):
             return 1
     except GraphAPIError as exc:
         print(f"Token doğrulanamadı: {exc}")
