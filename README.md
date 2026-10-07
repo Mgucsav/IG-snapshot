@@ -135,6 +135,8 @@ All commands: `.venv\Scripts\python -m ig_snapshot <command>`
 | `report [--month YYYY-MM] [--all] [--overall]` | Rebuild reports from the database |
 | `status` | Last run, per-account last measurement, errors |
 | `export [--month YYYY-MM] [--all] [--db]` | Raw data dump: CSV + Excel (+ a copy of the database) |
+| `ledger [--date YYYY-MM-DD]` | Write the daily / weekly / monthly CSV ledger |
+| `rebuild [--compare]` | Rebuild the database from the CSV ledger (backup drill) |
 | `ask <text>` | Try a bot question without Telegram, e.g. `ask dün feed` |
 | `bot` | Run the Telegram bot in the foreground |
 | `week-summary [--end YYYY-MM-DD] [--send]` | Weekly report (print, or send to Telegram) |
@@ -176,6 +178,26 @@ reports/
 
 When a month ends, the first nightly run of the new month exports the finished month automatically
 (raw CSV/Excel plus a database copy) — once, tracked in the `meta` table.
+
+### CSV ledger (`data/`)
+
+Besides the database, every nightly run writes a plain-CSV ledger — the human-readable, immutable record
+that also serves as the backup:
+
+```
+data/
+  gonderiler.csv            post catalog: type, publish time, caption, link (source for a rebuild)
+  gunluk/2026-11-07.csv     that day only: each post's value and that day's gain, "ömrü doldu" stamp
+  gunluk/ozet/2026-11-07.csv   that day's per-account summary
+  haftalik/2026-W45.csv     Mon→Sun cumulative, rewritten nightly, new file every Monday
+  haftalik/gonderi/2026-W45.csv
+  aylik/2026-11.csv         month-to-date cumulative, new file on the 1st
+  aylik/gonderi/2026-11.csv
+```
+
+Daily files are written once and never touched again. Weekly and monthly files keep updating while their
+posts are still tracked, then settle. `python -m ig_snapshot rebuild --compare` restores the whole database
+from these files and verifies it row for row — the backup is tested, not assumed.
 
 Telegram:
 

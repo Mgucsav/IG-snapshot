@@ -337,6 +337,34 @@ Yeni adı `accounts.txt`'ye **senin** yazman gerekir (API eski adı bulamaz); ak
 
 ---
 
+## 8a. CSV defteri (ham kaydın değişmez kopyası + yedek)
+
+Her gece, veritabanına yazdıktan sonra aynı veri düz CSV olarak da yazılır:
+
+```
+ data/
+   gonderiler.csv              gönderi künyesi (tür, yayın, açıklama, link) — yedeğin kaynağı
+   gunluk/2026-11-07.csv       SADECE 7 Kasım: her gönderinin o günkü değeri + o günkü artışı + durum
+   gunluk/ozet/2026-11-07.csv  o günün hesap özeti (takipçi, paylaşım, kazanım)
+   haftalik/2026-W45.csv       Pzt→Paz kümülatif · her gece güncellenir · Pazartesi YENİ dosya
+   haftalik/gonderi/2026-W45.csv
+   aylik/2026-11.csv           ay başından bugüne kümülatif · ayın 1'inde YENİ dosya
+   aylik/gonderi/2026-11.csv
+```
+
+Kurallar:
+- **Günlük dosya bir kez yazılır**, bir daha dokunulmaz → denetim izi.
+- Ömrü dolan gönderi, son ölçüldüğü günün dosyasında `ömrü doldu` damgasıyla görünür; sonraki günlerde yer almaz.
+- **Haftalık/aylık dosyalar sıfırlanmaz, yenilenir**: yeni dönem = yeni dosya. Biten dönem, içindeki
+  gönderiler ömrünü tamamlayana kadar güncellenmeye devam eder, sonra kendiliğinden sabitlenir.
+- Hafta ay sınırını aşabilir (Pzt→Paz bütündür); haftalık ve aylık birbirinden bağımsızdır.
+- İki sütun ayrımı: `donem_icerikleri_*` = o dönemde yayınlananların ulaştığı değer (içerik performansı),
+  `kazanilan_*` = eskiler dahil tüm arşivin o dönemdeki artışı (kanal hareketi).
+
+**Yedek tatbikatı:** `python -m ig_snapshot rebuild --compare` bu CSV'lerden veritabanını sıfırdan kurar
+ve mevcutla karşılaştırır. 07.10.2026 testinde 14.434 ölçüm, 2.357 künye ve 77 profil satırı **birebir**
+geri yüklendi.
+
 ## 8b. Veriyi dışa aktarma (inceleme / arşiv)
 
 ```

@@ -153,6 +153,11 @@ def cmd_snapshot(args) -> int:
             channel_log.generate()
         except Exception:
             log.exception("Kanal dosyaları üretilemedi")
+        try:
+            from . import ledger
+            ledger.generate(day=snapshot_date)
+        except Exception:  # noqa: BLE001
+            log.exception("CSV defteri yazılamadı")
     print(f"Snapshot {result['date']}: {len(result['ok'])} hesap OK, {len(result['failed'])} hata")
     for u, e in result["failed"].items():
         print(f"  @{u}: {e}")
@@ -440,6 +445,51 @@ def export_month_once(month: str) -> bool:
     return True
 
 
+def cmd_ledger(args) -> int:
+    """Günlük/haftalık/aylık CSV defterlerini yaz."""
+    from . import ledger
+
+    day = date.fromisoformat(args.date) if args.date else date.today()
+    out = ledger.generate(day=day)
+    toplam = sum(len(v) for v in out.values())
+    if not toplam:
+        print(f"{day} için veri yok.")
+        return 1
+    for tur, dosyalar in out.items():
+        for f in dosyalar:
+            print(f"  {tur:<9} {f}")
+    return 0
+
+
+def cmd_rebuild(args) -> int:
+    """CSV defterinden veritabanını yeniden kur (yedek tatbikatı)."""
+    from pathlib import Path
+
+    from . import ledger
+
+    hedef = Path(args.out or (config.DATA_DIR / "yeniden_kurulan.db"))
+    sayac = ledger.rebuild(hedef)
+    print(f"Yeniden kuruldu: {hedef}")
+    print(f"  {sayac['hesap']} hesap · {sayac['gonderi']} gönderi · {sayac['olcum']} ölçüm · {sayac['profil']} profil satırı")
+    if args.compare:
+        conn_a, conn_b = db.connect(config.DB_PATH), db.connect(hedef)
+        try:
+            fark = []
+            for t in ("accounts", "profile_snapshots", "media", "media_snapshots"):
+                a = conn_a.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+                b = conn_b.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+                print(f"  {t:<20} mevcut {a:>8,}  yeniden {b:>8,}  {'eşit' if a == b else 'FARKLI'}")
+                if a != b:
+                    fark.append(t)
+        finally:
+            conn_a.close(); conn_b.close()
+        if fark:
+            print("UYARI: fark var →", ", ".join(fark))
+            return 1
+        print("Yedek doğrulandı: satır sayıları birebir eşit.")
+    return 0
+
+
 def cmd_export(args) -> int:
     """Ham veriyi CSV + Excel olarak dışa aktar."""
     from . import export, report
@@ -602,6 +652,15 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--all", action="store_true", help="Veri olan tüm ayların raporunu yeniden üret")
     s.add_argument("--overall", action="store_true", help="Sadece genel (aylar arası) raporu üret")
     s.set_defaults(func=cmd_report)
+
+    s = sub.add_parser("ledger", help="Günlük/haftalık/aylık CSV defterlerini yaz (data/gunluk, haftalik, aylik)")
+    s.add_argument("--date", help="Gün (YYYY-MM-DD), varsayılan bugün")
+    s.set_defaults(func=cmd_ledger)
+
+    s = sub.add_parser("rebuild", help="CSV defterinden veritabanını yeniden kur (yedek tatbikatı)")
+    s.add_argument("--out", help="Hedef .db dosyası (varsayılan data/yeniden_kurulan.db)")
+    s.add_argument("--compare", action="store_true", help="Mevcut veritabanıyla karşılaştır")
+    s.set_defaults(func=cmd_rebuild)
 
     s = sub.add_parser("export", help="Ham veriyi CSV + Excel olarak dışa aktar")
     s.add_argument("--month", help="YYYY-MM (varsayılan içinde bulunulan ay)")

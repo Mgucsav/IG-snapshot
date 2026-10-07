@@ -110,7 +110,7 @@ IG-snapshot/
 | `MEDIA_MAX` | `600` | Hesap başına üst sınır (güvenlik) |
 | `TRACK_DAYS` | `45` | Gönderi yayından sonra en fazla bu kadar gün çekilir; sayfalama bu tarihe kadar iner |
 | `STOP_RATIO` | `0.2` | Tamamlanma: günlük artış < STOP_RATIO × önceki günün artışı |
-| `MIN_TRACK_DAYS` | `3` | Tamamlanma kararı için asgari yaş/ölçüm |
+| `MIN_TRACK_DAYS` | `5` | Tamamlanma kararı için asgari yaş (07.10.2026 ölçümü: 3 günde donanlar %7 eksik kalıyordu, 5 günde ~%2) |
 | `PRUNE_AFTER_DAYS` | `0` | 0 = hiçbir ölçüm silinmez (varsayılan, kullanıcı kararı); >0 budamayı açar |
 | `REQUEST_PAUSE` | `1.5` | Hesaplar arası bekleme (sn) |
 | `USAGE_PAUSE_PCT` | `70` | `X-App-Usage` yüzdesi bunu aşınca bekle |
