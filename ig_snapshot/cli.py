@@ -48,6 +48,13 @@ def _print_token_info(client: GraphClient) -> dict:
     else:
         exp_text = "süresiz"
     print(f"Token: {'GEÇERLİ' if valid else 'GEÇERSİZ'} · tür: {info.get('type', '?')} · bitiş: {exp_text}")
+    # İkinci süre: veri erişimi penceresi. Dolduğunda token geçerli görünür ama veri gelmez.
+    dexp = info.get("data_access_expires_at") or 0
+    if dexp:
+        d_dt = datetime.fromtimestamp(dexp)
+        print(f"Veri erişimi: {d_dt:%d.%m.%Y} ({(d_dt - datetime.now()).days} gün kaldı)")
+    else:
+        print("Veri erişimi: sınırsız")
     scopes = info.get("scopes") or []
     if scopes:
         print(f"İzinler: {', '.join(scopes)}")

@@ -80,28 +80,41 @@ def discover_chats(token: str) -> list[tuple[str, str]]:
 # --- token durumu -----------------------------------------------------------
 
 def token_status(client: GraphClient) -> dict:
-    """{'valid': bool, 'days': int|None, 'expires': 'dd.mm.yyyy'|None, 'error': str|None}"""
+    """Token sağlığı — İKİ ayrı süre vardır, ikisi de işi durdurabilir:
+
+    - `expires_at`             : tokenın kendi ömrü (süresiz tokenda 0)
+    - `data_access_expires_at` : veri erişimi penceresi (90 gün, kullanıcı etkileşimine bağlı).
+      Dolduğunda token "geçerli" görünmeye devam eder ama veri gelmez; yeniden yetkilendirme gerekir.
+    """
     try:
         info = client.debug_token()
     except GraphAPIError as exc:
-        return {"valid": False, "days": None, "expires": None, "error": str(exc)}
-    exp = info.get("expires_at") or 0
-    if exp:
-        exp_dt = datetime.fromtimestamp(exp)
-        days = (exp_dt - datetime.now()).days
-        return {"valid": bool(info.get("is_valid")), "days": days, "expires": f"{exp_dt:%d.%m.%Y}", "error": None}
-    return {"valid": bool(info.get("is_valid")), "days": None, "expires": None, "error": None}
+        return {"valid": False, "days": None, "expires": None,
+                "data_days": None, "data_expires": None, "error": str(exc)}
+    out = {"valid": bool(info.get("is_valid")), "days": None, "expires": None,
+           "data_days": None, "data_expires": None, "error": None}
+    if info.get("expires_at"):
+        dt = datetime.fromtimestamp(info["expires_at"])
+        out["days"], out["expires"] = (dt - datetime.now()).days, f"{dt:%d.%m.%Y}"
+    if info.get("data_access_expires_at"):
+        dt = datetime.fromtimestamp(info["data_access_expires_at"])
+        out["data_days"], out["data_expires"] = (dt - datetime.now()).days, f"{dt:%d.%m.%Y}"
+    return out
 
 
 def token_warning(status: dict) -> str | None:
     if status.get("error") or not status.get("valid"):
         return ("🚨 <b>Instagram tokenı geçersiz / süresi dolmuş.</b> Snapshot alınamıyor.\n"
                 "Graph API Explorer → yeni token → Access Token Debugger → Extend → .env IG_ACCESS_TOKEN")
-    days = status.get("days")
+    days, ddays = status.get("days"), status.get("data_days")
     if days is not None and days <= config.TOKEN_WARN_DAYS:
         return (f"⚠️ <b>Instagram tokenı {days} gün sonra bitiyor</b> ({status['expires']}).\n"
-                f"Kalıcı çözüm: Graph API Explorer'dan kullanıcı tokenı al → .env'e FB_USER_TOKEN yaz → "
-                f"<code>python -m ig_snapshot token-setup</code> (süresiz sayfa tokenı üretir).")
+                f"Graph API Explorer'dan kullanıcı tokenı al → .env'e FB_USER_TOKEN yaz → "
+                f"<code>python -m ig_snapshot token-setup</code>")
+    if ddays is not None and ddays <= config.TOKEN_WARN_DAYS:
+        return (f"⚠️ <b>Veri erişimi {ddays} gün sonra kapanıyor</b> ({status['data_expires']}).\n"
+                f"Token geçerli görünmeye devam eder ama veri gelmez — yeniden yetkilendirme gerekir: "
+                f"Graph API Explorer → kullanıcı tokenı → <code>token-setup</code>")
     return None
 
 
