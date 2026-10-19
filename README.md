@@ -1,5 +1,9 @@
 # IG Snapshot
 
+![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
+![SQL](https://img.shields.io/badge/SQL-SQLite-003B57?logo=sqlite&logoColor=white)
+![License](https://img.shields.io/badge/License-not%20specified-lightgrey)
+
 IG Snapshot is a Windows-based Instagram competitor tracker built on the official Instagram Graph API
 (*Business Discovery*). Every night it collects public metrics for a configured list of Business/Creator
 accounts, stores the measurements locally in SQLite, rebuilds monthly / daily / per-account Excel reports,
@@ -8,6 +12,11 @@ sends a Telegram summary, and answers ad-hoc questions through a Telegram bot ("
 
 It only **reads** data that the Graph API exposes for the granted token. It does not publish, like, follow, or
 automate any activity on Instagram. No external database or hosting is required; everything runs on one PC.
+
+For digital media teams, nightly collection replaces repetitive manual checks with a consistent historical
+record. Follower growth, post engagement, and publishing activity can be compared across accounts and periods,
+helping analysts spot changes and plan content with evidence. This is an automated extraction and reporting
+pipeline, not a source of metrics that Meta does not expose.
 
 Turkish documentation: [`docs/NASIL_CALISIYOR.md`](docs/NASIL_CALISIYOR.md) (how it works — diagrams and
 pseudo-code, which data lives in which table), [`docs/SISTEM_DOKUMANI.md`](docs/SISTEM_DOKUMANI.md)
@@ -75,14 +84,27 @@ night. `python -m ig_snapshot limit-test` measures the actual per-call cost with
   Instagram Business/Creator account linked to a Facebook Page
 - Optional: a Telegram bot (via @BotFather) for notifications and the chat bot
 
+## Tech stack
+
+| Technology | Role |
+|---|---|
+| Python | Collection, processing, reports, and command-line interface |
+| SQLite / SQL | Local historical storage and queries |
+| `requests` | Meta and Telegram API requests |
+| `python-dotenv` | Local `.env` configuration |
+| `openpyxl` | Excel report generation |
+| Python `logging` | Run diagnostics and API usage records |
+
+Pandas is not currently a project dependency; see `requirements.txt` for the installed packages.
+
 ## Installation
 
 ```powershell
 git clone https://github.com/Mgucsav/IG-snapshot.git
 cd IG-snapshot
 python -m venv .venv
-.venv\Scripts\pip install -r requirements.txt
-copy .env.example .env
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+Copy-Item .env.example .env
 ```
 
 1. Put the Instagram token into `.env` (`IG_ACCESS_TOKEN=`). Leave `IG_USER_ID` empty; `check` discovers it.
@@ -99,10 +121,17 @@ copy .env.example .env
 3. Validate:
 
    ```powershell
-   .venv\Scripts\python -m ig_snapshot check
+   .\.venv\Scripts\python.exe -m ig_snapshot check
    ```
 
    Shows token validity and expiry, writes `IG_USER_ID`, and runs a trial query on the first account.
+
+4. Run the collection and inspect the result:
+
+   ```powershell
+   .\.venv\Scripts\python.exe -m ig_snapshot snapshot
+   .\.venv\Scripts\python.exe -m ig_snapshot status
+   ```
 
 ### Telegram (optional)
 
@@ -226,7 +255,7 @@ them by hand is not preserved; a file open in Excel is skipped that night and lo
 | `MEDIA_MAX` | `600` | Hard cap of posts per account per run |
 | `TRACK_DAYS` | `45` | Posts are fetched while younger than this |
 | `STOP_RATIO` | `0.2` | Tracking stops when daily gain < ratio × previous day's gain |
-| `MIN_TRACK_DAYS` | `3` | Minimum age before a post can stop being tracked |
+| `MIN_TRACK_DAYS` | `5` | Minimum age before a post can stop being tracked |
 | `PRUNE_AFTER_DAYS` | `0` | 0 = keep every measurement (default); >0 enables pruning of stopped posts' intermediate rows |
 | `REQUEST_PAUSE` | `1.5` | Seconds between accounts |
 | `USAGE_PAUSE_PCT` | `70` | Pause when `X-App-Usage` exceeds this percentage |
@@ -256,8 +285,9 @@ written into `accounts.txt` because the API is queried by username.
 
 ## Public repository and private runtime data
 
-This repository contains only source code, scripts, sanitized documentation, `requirements.txt` and the
-`.env.example` template. The following are ignored by `.gitignore` and must never be committed:
+Credentials are read from the local `.env` file; the source does not require hardcoded credentials. This
+repository contains source code, scripts, documentation, `requirements.txt`, and the `.env.example` template.
+The following are ignored by `.gitignore` and must never be committed:
 
 | Item | Reason |
 |---|---|
@@ -265,7 +295,7 @@ This repository contains only source code, scripts, sanitized documentation, `re
 | `accounts.txt` | Identifies the monitored accounts |
 | `data/` | SQLite history, control exports, bot lock |
 | `reports/` | Captions, links, metrics, generated workbooks |
-| `logs/` | Operational output (tokens are masked, but logs stay local) |
+| `logs/` | Operational output; keep it private even when sensitive fields are masked |
 | `.venv/`, `__pycache__/`, `.obsidian/` | Environment and editor state |
 
 If a credential is ever exposed, revoke or rotate it immediately (Meta: generate a new token; Telegram: `/revoke`
@@ -274,29 +304,27 @@ in @BotFather) and update `.env`.
 ## Project structure
 
 ```text
-ig_snapshot/
-  api.py           Graph API client: pagination, stop conditions, usage headers, retries
-  snapshot.py      Nightly collection, completion rule, pruning, capacity pauses
-  report.py        Monthly calculation core (AccountReport) and rapor-YYYY-MM.* outputs
-  daily_report.py  Daily cohort workbook and today's highlights
-  overall.py       Cross-month history and charts
-  channel_log.py   Per-account workbooks
-  weekly.py        Weekly Telegram report
-  notify.py        Telegram delivery, evening / month-end / crash messages, token status
-  bot.py           Telegram long-polling bot (single instance)
-  queries.py       Question parsing and answers
-  limit_test.py    API capacity measurement
-  db.py            SQLite schema, migrations and queries
-  content.py       Content type classification (Reels / Feed)
-  config.py        .env and accounts.txt parsing
-  cli.py           Commands
-scripts/
-  run_snapshot.bat, run_report.bat, register_task.ps1, register_bot.ps1
-docs/
-  SISTEM_DOKUMANI.md (Turkish technical documentation), CALISMA_GUNLUGU.md (work log)
+IG-snapshot/
+├── .venv/              # Local Python environment (ignored)
+├── data/               # SQLite database and CSV ledger (ignored)
+├── docs/               # Turkish system and operating documentation
+├── ig_snapshot/        # Graph API client, collection, storage, reporting, CLI
+├── logs/               # Runtime logs (ignored)
+├── reports/            # Generated Excel, CSV, and Markdown reports (ignored)
+├── scripts/            # Windows task and command wrappers
+├── tests/              # Offline regression tests
+├── .env.example        # Configuration template; no credential values
+├── requirements.txt    # Python dependencies
+└── README.md
 ```
+
+## License
+
+No license file is currently included. Add one before describing the repository as open source or granting
+reuse rights.
 
 ## Responsible use
 
 Use this tool only with a token you are authorized to use and within Meta's Platform Terms. The data collected
-is public account data exposed by the Graph API; keep the local database and reports private.
+is account data exposed by the Graph API for analytical purposes; handle it under applicable privacy
+requirements, respect rate limits, and keep the local database and reports private.
